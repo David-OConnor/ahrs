@@ -105,7 +105,7 @@ pub struct Settings {
 
 impl Settings {
     /// See above field descriptions for why we use these defaults.
-    fn new(dt: f32) -> Self {
+    pub fn new(dt: f32) -> Self {
         Self {
             convention: AxisConvention::EastNorthUp,
             gain: 0.5,

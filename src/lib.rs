@@ -22,9 +22,8 @@
 //! Z to be up/down (yaw)
 
 mod ahrs_fusion;
-mod attitude_platform;
 
-pub use ahrs_fusion::Ahrs;
+pub use ahrs_fusion::{Ahrs, Settings};
 
 use lin_alg2::f32::{Mat3, Vec3, Quaternion};
 
@@ -69,18 +68,18 @@ pub struct ImuReadings {
 
 impl ImuReadings {
     /// We use this to assemble readings from the DMA buffer.
-    pub fn from_buffer(buf: &[u8], gyro_fullscale: f32, accel_fullscale: f32) -> Self {
+    pub fn from_buffer(buf: &[u8], accel_fullscale: f32, gyro_fullscale: f32) -> Self {
         // todo: Note: this mapping may be different for diff IMUs, eg if they use a different reading register ordering.
         // todo: Currently hard-set for ICM426xx.
 
         // Ignore byte 0; it's for the first reg passed during the `write` transfer.
         Self {
-            a_x: interpret_accel_or_gyro(i16::from_be_bytes([buf[1], buf[2]]), gyro_fullscale),
-            a_y: interpret_accel_or_gyro(i16::from_be_bytes([buf[3], buf[4]]), gyro_fullscale),
-            a_z: interpret_accel_or_gyro(i16::from_be_bytes([buf[5], buf[6]]), gyro_fullscale),
-            v_pitch: interpret_accel_or_gyro(i16::from_be_bytes([buf[7], buf[8]]), accel_fullscale),
-            v_roll: interpret_accel_or_gyro(i16::from_be_bytes([buf[9], buf[10]]), accel_fullscale),
-            v_yaw: -interpret_accel_or_gyro(i16::from_be_bytes([buf[11], buf[12]]), accel_fullscale),
+            a_x: interpret_accel_or_gyro(i16::from_be_bytes([buf[1], buf[2]]), accel_fullscale),
+            a_y: interpret_accel_or_gyro(i16::from_be_bytes([buf[3], buf[4]]), accel_fullscale),
+            a_z: interpret_accel_or_gyro(i16::from_be_bytes([buf[5], buf[6]]), accel_fullscale),
+            v_pitch: interpret_accel_or_gyro(i16::from_be_bytes([buf[7], buf[8]]), gyro_fullscale),
+            v_roll: interpret_accel_or_gyro(i16::from_be_bytes([buf[9], buf[10]]), gyro_fullscale),
+            v_yaw: -interpret_accel_or_gyro(i16::from_be_bytes([buf[11], buf[12]]), gyro_fullscale),
         }
     }
 }
