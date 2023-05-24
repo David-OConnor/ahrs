@@ -22,13 +22,17 @@
 //! Z to be up/down (yaw)
 
 mod ahrs_fusion;
+pub mod params;
+pub mod ppks;
 
 pub use ahrs_fusion::{Ahrs, Settings};
+pub use params::Params;
 
-use lin_alg2::f32::{Mat3, Vec3, Quaternion};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+use lin_alg2::f32::{Mat3, Quaternion, Vec3};
+use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
 // todo: Try this : https://github.com/Mayitzin/ahrs/blob/master/ahrs/filters/ekf.py
-
 
 // use defmt::println;
 
@@ -46,6 +50,57 @@ use lin_alg2::f32::{Mat3, Vec3, Quaternion};
 // some care) since the the unit constraint will be violated. You can instead use an
 // error-state EKF
 // http://www.iri.upc.edu/people/jsola/JoanSola/objectes/notes/kinematics.pdf
+
+impl Default for FixType {
+    fn default() -> Self {
+        Self::NoFix
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u8)]
+pub enum FixType {
+    // These values are from the UBLOX protocol.
+    NoFix = 0,
+    DeadReckoning = 1,
+    Fix2d = 2,
+    Fix3d = 3,
+    /// GNSS + dead reckoning combined
+    Combined = 4,
+    TimeOnly = 5,
+}
+
+#[derive(Default)]
+/// In a format conducive to being parsed from the UBX PVT. (`UBX-NAV-PVT`)
+/// Note: For position and elevation, we use the same units as Ublox reports; we
+/// can convert to floats as required downstream.
+pub struct Fix {
+    /// This timestamp is local, eg synced from CAN bus.
+    pub timestamp_s: f32,
+    pub datetime: NaiveDateTime,
+    pub type_: FixType,
+    // /// Degrees
+    // pub lat: f64,
+    // /// Degrees
+    // pub lon: f64,
+    /// Degrees x 1e7
+    pub lat: i32,
+    /// Degrees x 1e7
+    pub lon: i32,
+    /// mm
+    pub elevation_hae: i32,
+    /// mm
+    pub elevation_msl: i32,
+    /// mm/s
+    pub ground_speed: i32,
+    /// North, east, down velocity; in that order. In mm/s.
+    pub ned_velocity: [i32; 3],
+    /// Degrees
+    pub heading: Option<f32>, // only when valid.
+    pub sats_used: u8,
+    /// Position dilution of precision. Divided by 100.
+    pub pdop: u16,
+}
 
 /// Represents sensor readings from a 6-axis accelerometer + gyro.
 /// Accelerometer readings are in m/2^2. Gyroscope readings are in radians/s.
@@ -65,7 +120,6 @@ pub struct ImuReadings {
     pub v_yaw: f32,
 }
 
-
 impl ImuReadings {
     /// We use this to assemble readings from the DMA buffer.
     pub fn from_buffer(buf: &[u8], accel_fullscale: f32, gyro_fullscale: f32) -> Self {
@@ -84,28 +138,32 @@ impl ImuReadings {
     }
 }
 
-
 /// Update the attitude from the AHRS.
-pub fn get_attitude(ahrs: &mut Ahrs, imu_readings: &ImuReadings, mag_readings: Option<Vec3>, dt: f32) -> Quaternion {
+pub fn get_attitude(
+    ahrs: &mut Ahrs,
+    imu_readings: &ImuReadings,
+    mag_readings: Option<Vec3>,
+    dt: f32,
+) -> Quaternion {
     // Gyro measurements - not really a vector.
     // In our IMU interpretation, we use direction references that make sense for our aircraft.
     // See `ImuReadings` field descriptions for this. Here, we undo it: The AHRS
     // fusion algorithm expects raw readings. (See the - signs there and here; they correspond)
 
     // ICM dirs: X right, Y back, Z up
-    // Pitch nose up, roll right wing down, yaw CCW\
+    // Pitch nose up, roll right wing down, yaw CCW
     // LIS3 mat: X left, Y back, z up
 
     let accel_data = Vec3 {
         x: imu_readings.a_x,
-        y: imu_readings.a_y,
+        y: -imu_readings.a_y, // negative due to our IMU's coord system.
         z: imu_readings.a_z,
     };
 
     let gyro_data = Vec3 {
         x: imu_readings.v_pitch,
         y: imu_readings.v_roll,
-        z: imu_readings.v_yaw,
+        z: -imu_readings.v_yaw,
     };
     let gyro_data = Vec3::new_zero();
 
@@ -133,19 +191,16 @@ pub fn get_attitude(ahrs: &mut Ahrs, imu_readings: &ImuReadings, mag_readings: O
 
     match mag_readings {
         Some(m) => {
-            // todo: QC dir and order.
             let mag_data = Vec3 {
-                x: m.y,
-                y: m.x,
+                x: -m.y, // negative due to our mag's coord system.
+                y: -m.x,
                 z: m.z,
             };
 
-            // ahrs.update(gyro_data, accel_data, mag_data, dt);
-            // todo:TEmp. Put back version with mag data.
-            ahrs.update_no_magnetometer(gyro_data, accel_data, dt);
+            ahrs.update(gyro_data, accel_data, Some(mag_data), dt);
         }
         None => {
-            ahrs.update_no_magnetometer(gyro_data, accel_data, dt);
+            ahrs.update(gyro_data, accel_data, None, dt);
         }
     }
 
@@ -228,5 +283,3 @@ pub fn calibrate() -> ImuCalibration {
     // todo: average? lowpass?
     Default::default()
 }
-
-

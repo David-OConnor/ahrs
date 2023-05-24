@@ -8,3 +8,10 @@ description = "Attitude and heading reference system"
 [dependencies]
 num-traits = { version = "^0.2.15", default_features = false } # Absolute value, powers etc.
 lin-alg2 = { path = "../lin_alg", features = ["no_std"] }
+defmt = "0.3.4"
+
+# To parse enums from their integer repr
+num_enum = { version = "^0.6.1", default_features = false }
+
+# `Chrono` for GNSS timestamp
+chrono = { version = "^0.4.23", default-features = false }

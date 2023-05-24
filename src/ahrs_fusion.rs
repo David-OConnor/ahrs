@@ -45,6 +45,17 @@ const INITIAL_GAIN: f32 = 10.0;
 // Initialisation period in seconds.
 const INITIALISATION_PERIOD: f32 = 3.0;
 
+const DOWN: Vec3 = Vec3 {
+    x: 0.,
+    y: 0.,
+    z: -1.,
+};
+const FORWARD: Vec3 = Vec3 {
+    x: 0.,
+    y: 1.,
+    z: 0.,
+};
+
 fn is_zero(v: Vec3) -> bool {
     const EPS: f32 = 0.00001;
     v.x.abs() < EPS && v.y.abs() < EPS && v.z.abs() < EPS
@@ -128,10 +139,8 @@ pub struct Ahrs {
     pub ramped_gain_step: f32,
     pub half_accelerometer_feedback: Vec3,
     pub half_magnetometer_feedback: Vec3,
-    pub accelerometer_ignored: bool,
     pub accel_rejection_timer: u32,
     pub accel_rejection_timeout: bool,
-    pub magnetometer_ignored: bool,
     pub mag_rejection_timer: u32,
     pub mag_rejection_timeout: bool,
     pub offset: Offset,
@@ -149,10 +158,8 @@ impl Ahrs {
             ramped_gain_step: 0.,
             half_accelerometer_feedback: Vec3::new_zero(),
             half_magnetometer_feedback: Vec3::new_zero(),
-            accelerometer_ignored: false,
             accel_rejection_timer: 0,
             accel_rejection_timeout: false,
-            magnetometer_ignored: false,
             mag_rejection_timer: 0,
             mag_rejection_timeout: false,
             offset: Default::default(),
@@ -175,10 +182,8 @@ impl Ahrs {
         self.ramped_gain = INITIAL_GAIN;
         self.half_accelerometer_feedback = Vec3::new_zero();
         self.half_magnetometer_feedback = Vec3::new_zero();
-        self.accelerometer_ignored = false;
         self.accel_rejection_timer = 0;
         self.accel_rejection_timeout = false;
-        self.magnetometer_ignored = false;
         self.mag_rejection_timer = 0;
         self.mag_rejection_timeout = false;
     }
@@ -211,8 +216,7 @@ impl Ahrs {
     /// accelerometer Accelerometer measurement is in m/s^2.
     /// Magnetometer measurement is in arbitrary units.
     /// dt is in seconds.
-    pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Vec3, dt: f32) {
-        // Store accelerometer
+    pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>, dt: f32) {
         self.accelerometer = accel_data;
 
         // Ramp down gain during initialisation
@@ -225,78 +229,87 @@ impl Ahrs {
             }
         }
 
-        // Calculate direction of gravity indicated by algorithm
-        let half_gravity = self.half_gravity();
+        let accel_norm = accel_data.to_normalized();
+        let accel_mag = accel_data.magnitude();
+        let att_from_accel = Quaternion::from_unit_vecs(DOWN, accel_norm);
+
+        // let half_gravity = self.half_gravity();
+        let half_gravity = Vec3::new_zero(); // todo temp
 
         // Calculate accelerometer feedback
         let mut half_accelerometer_feedback = Vec3::new_zero();
-        self.accelerometer_ignored = true;
-        if !is_zero(accel_data) {
-            // Enter acceleration recovery state if acceleration rejection times out
-            if self.accel_rejection_timer > self.settings.rejection_timeout {
-                let quaternion = self.quaternion;
-                self.reset();
-                self.quaternion = quaternion;
-                self.accel_rejection_timer = 0;
-                self.accel_rejection_timeout = true;
-            }
 
-            // Calculate accelerometer feedback scaled by 0.5
-            self.half_accelerometer_feedback = accel_data.to_normalized().cross(half_gravity);
+        let att_from_accel = Quaternion::from_unit_vecs(DOWN, accel_data.to_normalized());
 
-            // Ignore accelerometer if acceleration distortion detected
-            if self.initialising
-                || self.half_accelerometer_feedback.magnitude_squared()
-                    <= self.settings.accel_rejection
-            {
-                half_accelerometer_feedback = self.half_accelerometer_feedback;
-                self.accelerometer_ignored = false;
-                self.accel_rejection_timer -= if self.accel_rejection_timer >= 10 {
-                    10
-                } else {
-                    0
-                };
+        // Enter acceleration recovery state if acceleration rejection times out
+        if self.accel_rejection_timer > self.settings.rejection_timeout {
+            let quaternion = self.quaternion;
+            self.reset();
+            self.quaternion = quaternion;
+            self.accel_rejection_timer = 0;
+            self.accel_rejection_timeout = true;
+        }
+
+        // Calculate accelerometer feedback scaled by 0.5
+        self.half_accelerometer_feedback = accel_data.to_normalized().cross(half_gravity);
+
+        // Ignore accelerometer if acceleration distortion detected
+        if self.initialising
+            || self.half_accelerometer_feedback.magnitude_squared() <= self.settings.accel_rejection
+        {
+            half_accelerometer_feedback = self.half_accelerometer_feedback;
+            self.accel_rejection_timer -= if self.accel_rejection_timer >= 10 {
+                10
             } else {
-                self.accel_rejection_timer += 1;
-            }
+                0
+            };
+        } else {
+            self.accel_rejection_timer += 1;
         }
 
         // Calculate magnetometer feedback
         let mut half_magnetometer_feedback = Vec3::new_zero();
-        self.magnetometer_ignored = true;
 
-        if !is_zero(mag_data) {
-            // Set to compass heading if magnetic rejection times out
-            self.mag_rejection_timeout = false;
-            if self.mag_rejection_timer > self.settings.rejection_timeout {
-                self.set_heading(compass_calc_heading(half_gravity, mag_data));
-                self.mag_rejection_timer = 0;
-                self.mag_rejection_timeout = true;
-            }
+        match mag_data {
+            Some(mag) => {
+                let att_from_mag = Quaternion::from_unit_vecs(FORWARD, mag.to_normalized());
 
-            // Compute direction of west indicated by algorithm
-            let half_magnetic = self.half_magnetic();
+                // Set to compass heading if magnetic rejection times out
+                self.mag_rejection_timeout = false;
+                if self.mag_rejection_timer > self.settings.rejection_timeout {
+                    self.set_heading(compass_calc_heading(half_gravity, mag));
+                    self.mag_rejection_timer = 0;
+                    self.mag_rejection_timeout = true;
+                }
 
-            // Calculate magnetometer feedback scaled by 0.5
-            self.half_magnetometer_feedback = half_gravity
-                .cross(mag_data)
-                .to_normalized()
-                .cross(half_magnetic);
+                // Compute direction of west indicated by algorithm
+                // let half_magnetic = self.half_magnetic();
+                let half_magnetic = Vec3::new_zero(); // todo temp
 
-            // Ignore magnetometer if magnetic distortion detected
-            if self.initialising
-                || self.half_magnetometer_feedback.magnitude_squared()
-                    <= self.settings.magnetic_rejection
-            {
-                half_magnetometer_feedback = self.half_magnetometer_feedback;
-                self.magnetometer_ignored = false;
-                self.mag_rejection_timer -= if self.mag_rejection_timer >= 10 {
-                    10
+                // Calculate magnetometer feedback scaled by 0.5
+                self.half_magnetometer_feedback =
+                    half_gravity.cross(mag).to_normalized().cross(half_magnetic);
+
+                // Ignore magnetometer if magnetic distortion detected
+                if self.initialising
+                    || self.half_magnetometer_feedback.magnitude_squared()
+                        <= self.settings.magnetic_rejection
+                {
+                    half_magnetometer_feedback = self.half_magnetometer_feedback;
+                    self.mag_rejection_timer -= if self.mag_rejection_timer >= 10 {
+                        10
+                    } else {
+                        0
+                    };
                 } else {
-                    0
-                };
-            } else {
-                self.mag_rejection_timer += 1;
+                    self.mag_rejection_timer += 1;
+                }
+            }
+            None => {
+                // Zero heading during initialisation
+                if self.initialising && !self.accel_rejection_timeout {
+                    self.set_heading(0.0);
+                }
             }
         }
 
@@ -311,112 +324,42 @@ impl Ahrs {
         self.quaternion = self.quaternion.to_normalized();
     }
 
-    /// Returns the direction of gravity scaled by 0.5.
-    /// ahrs AHRS algorithm structure.
-    /// Direction of gravity scaled by 0.5.
-    fn half_gravity(&self) -> Vec3 {
-        let q = self.quaternion;
+    // /// Updates the AHRS algorithm using the gyroscope, accelerometer, and
+    // /// heading measurements.
+    // /// Gyroscope measurement is in radians per second.
+    // /// Accelerometer is measured in m/s^2
+    // /// Heading measurement is in radians per second.
+    // /// dt is in seconds.
+    // pub fn update_external_heading(
+    //     &mut self,
+    //     gyroscope: Vec3,
+    //     accelerometer: Vec3,
+    //     heading: f32,
+    //     dt: f32,
+    // ) {
+    //     // Calculate roll
+    //     let q = self.quaternion;
+    //     let roll = (q.w * q.x + q.y * q.z).atan2(0.5 - q.y * q.y - q.x * q.x);
+    //
+    //     // Calculate magnetometer
+    //     let sin_heading = heading.sin();
+    //     let magnetometer = Vec3 {
+    //         x: heading.cos(),
+    //         y: -1.0 * roll.cos() * sin_heading,
+    //         z: sin_heading * roll.sin(),
+    //     };
+    //
+    //     // Update AHRS algorithm
+    //     self.update(gyroscope, accelerometer, magnetometer, dt);
+    // }
 
-        match self.settings.
-            convention {
-            AxisConvention::NorthWestUp | AxisConvention::EastNorthUp => {
-                Vec3 {
-                    x: q.x * q.z - q.w * q.y,
-                    y: q.y * q.z + q.w * q.x,
-                    z: q.w * q.w - 0.5 + q.z * q.z,
-                } // third column of transposed rotation matrix scaled by 0.5
-            }
-
-            AxisConvention::NorthEastDown => {
-                Vec3 {
-                    x: q.w * q.y - q.x * q.z,
-                    y: -1.0 * (q.y * q.z + q.w * q.x),
-                    z: 0.5 - q.w * q.w - q.z * q.z,
-                } // third column of transposed rotation matrix scaled by -0.5
-            }
-        }
-    }
-
-    /// Returns the direction of the magnetic field scaled by 0.5.
-    /// ahrs AHRS algorithm structure.
-    /// Direction of the magnetic field scaled by 0.5.
-    fn half_magnetic(&self) -> Vec3 {
-        let q = self.quaternion;
-
-        match self.settings.convention {
-            AxisConvention::NorthWestUp => {
-                Vec3 {
-                    x: q.x * q.y + q.w * q.z,
-                    y: q.w * q.w - 0.5 + q.y * q.y,
-                    z: q.y * q.z - q.w * q.x,
-                } // second column of transposed rotation matrix scaled by 0.5
-            }
-            AxisConvention::EastNorthUp => {
-                Vec3 {
-                    x: 0.5 - q.w * q.w - q.x * q.x,
-                    y: q.w * q.z - q.x * q.y,
-                    z: -1.0 * (q.x * q.z + q.w * q.y),
-                } // first column of transposed rotation matrix scaled by -0.5
-            }
-            AxisConvention::NorthEastDown => {
-                Vec3 {
-                    x: -1.0 * (q.x * q.y + q.w * q.z),
-                    y: 0.5 - q.w * q.w - q.y * q.y,
-                    z: q.w * q.x - q.y * q.z,
-                } // second column of transposed rotation matrix scaled by -0.5
-            }
-        }
-    }
-
-    /// Updates the AHRS algorithm using the gyroscope and accelerometer
-    /// measurements only.
-    /// yroscope measurement is in radians per second.
-    /// Accelerometer measurement is in m/s^2
-    /// dt is in seconds.
-    pub fn update_no_magnetometer(&mut self, gyroscope: Vec3, accelerometer: Vec3, dt: f32) {
-        // Update AHRS algorithm
-        self.update(gyroscope, accelerometer, Vec3::new_zero(), dt);
-
-        // Zero heading during initialisation
-        if self.initialising && !self.accel_rejection_timeout {
-            self.set_heading(0.0);
-        }
-    }
-
-    /// Updates the AHRS algorithm using the gyroscope, accelerometer, and
-    /// heading measurements.
-    /// Gyroscope measurement is in radians per second.
-    /// Accelerometer is measured in m/s^2
-    /// Heading measurement is in radians per second.
-    /// dt is in seconds.
-    pub fn update_external_heading(
-        &mut self,
-        gyroscope: Vec3,
-        accelerometer: Vec3,
-        heading: f32,
-        dt: f32,
-    ) {
-        // Calculate roll
-        let q = self.quaternion;
-        let roll = (q.w * q.x + q.y * q.z).atan2(0.5 - q.y * q.y - q.x * q.x);
-
-        // Calculate magnetometer
-        let sin_heading = heading.sin();
-        let magnetometer = Vec3 {
-            x: heading.cos(),
-            y: -1.0 * roll.cos() * sin_heading,
-            z: sin_heading * roll.sin(),
-        };
-
-        // Update AHRS algorithm
-        self.update(gyroscope, accelerometer, magnetometer, dt);
-    }
-
+    // todo: Freestanding fn of accel data and att.
     /// Returns the linear acceleration measurement in  equal to the accelerometer
     /// measurement with the 9.8m/s^2 of gravity removed. Result is in m/2^2.
     pub fn get_linear_accel(&self) -> Vec3 {
         let q = self.quaternion;
 
+        // let gravity = self.quaternion.rotate_vec(DOWN);
         let gravity = Vec3 {
             x: 2.0 * (q.x * q.z - q.w * q.y),
             y: 2.0 * (q.y * q.z + q.w * q.x),
@@ -426,6 +369,7 @@ impl Ahrs {
         self.accelerometer - gravity
     }
 
+    // todo: Freestanding fn of accel data and att.
     /// Returns the Earth acceleration measurement equal to accelerometer
     /// measurement in the Earth coordinate frame with the 9.8m/s^2 of gravity removed.
     /// ahrs AHRS algorithm structure. Result is in m/2^2.
@@ -463,11 +407,9 @@ impl Ahrs {
             };
 
         InternalStates {
-            accel_error: fusion_asin(2.0 * self.half_accelerometer_feedback.magnitude()),
-            accelerometer_ignored: self.accelerometer_ignored,
+            accel_error: (2.0 * self.half_accelerometer_feedback.magnitude()).asin(),
             accel_rejection_timer,
-            magnetic_error: fusion_asin(2.0 * self.half_magnetometer_feedback.magnitude()),
-            magnetometer_ignored: self.magnetometer_ignored,
+            magnetic_error: (2.0 * self.half_magnetometer_feedback.magnitude()).asin(),
             magnetic_rejection_timer,
         }
     }
@@ -510,8 +452,6 @@ struct InternalStates {
     /// accelerometer. The acceleration rejection feature will ignore the accelerometer if this
     /// value exceeds the accelerationRejection threshold set in the algorithm settings.
     pub accel_error: f32,
-    /// true if the accelerometer was ignored by the previous algorithm update.
-    pub accelerometer_ignored: bool,
     /// Acceleration rejection timer value normalised to between 0.0 and 1.0. An acceleration
     /// rejection timeout will occur when this value reaches 1.0.
     pub accel_rejection_timer: f32,
@@ -519,8 +459,6 @@ struct InternalStates {
     /// magnetometer. The magnetic rejection feature will ignore the magnetometer if this value
     /// exceeds the magneticRejection threshold set in the algorithm settings.
     pub magnetic_error: f32,
-    /// true if the magnetometer was ignored by the previous algorithm update.
-    pub magnetometer_ignored: bool,
     /// Magnetic rejection timer value normalised to between 0.0 and 1.0. A magnetic rejection
     /// timeout will occur when this value reaches 1.0.
     pub magnetic_rejection_timer: f32,
@@ -611,14 +549,4 @@ pub fn compass_calc_heading(accelerometer: Vec3, magnetometer: Vec3) -> f32 {
 
     // Calculate angular heading relative to magnetic north
     magnetic_west.x.atan2(magnetic_north.x)
-}
-
-fn fusion_asin(value: f32) -> f32 {
-    if value <= -1.0 {
-        return TAU / -4.0;
-    }
-    if value >= 1.0 {
-        return TAU / 4.0;
-    }
-    value.asin()
 }
