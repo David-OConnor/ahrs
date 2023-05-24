@@ -6,7 +6,7 @@
 // use crate::{ppks::PositionFused};
 
 use crate::ImuReadings;
-use lin_alg2::f32::{Vec3, Quaternion};
+use lin_alg2::f32::{Quaternion, Vec3};
 
 /// Aircraft flight parameters, at a given instant. Pitch and roll rates are in the aircraft's
 /// frame of reference.
@@ -93,7 +93,6 @@ impl Params {
             self.mag_y = mag.y;
             self.mag_z = mag.z;
         }
-
     }
 
     // todo: PUt back once you merge PPKS to this mod.

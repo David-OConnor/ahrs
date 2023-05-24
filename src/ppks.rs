@@ -8,7 +8,7 @@ use num_traits::Float;
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::{params::Params, Fix};
+use crate::{params::Params, Fix, FORWARD, RIGHT, UP};
 
 const FIX_FUSED_SIZE: usize = 36;
 
@@ -16,14 +16,12 @@ const DEG_SCALE_1E8: f32 = 100_000_000.;
 
 use defmt::println;
 
-const G: f32 = 9.80665;
-
 /// This includes position information based on fusing GNSS and INS data.
 /// It doesn't include much of the metadata of a GNSS fix. We use Ublox
 /// conventions when able. For example, lat and lon are in deg / 1e7.
 /// todo: You may need to copy the exact bi lens of Fix2, and use PackedStruct.
 #[derive(Default)]
-pub struct PositionFused {
+pub struct PositFused {
     pub timestamp_us: u64, // microseconds
     pub lat_e8: i64,
     pub lon_e8: i64,
@@ -32,7 +30,7 @@ pub struct PositionFused {
     pub ned_velocity: [f32; 3], // m/s
 }
 
-impl PositionFused {
+impl PositFused {
     /// `fix` is the most-recently-received fix. `attitude` and `position_inertial` are the most recent ones
     /// as well.
     ///
@@ -40,12 +38,12 @@ impl PositionFused {
     /// todo of the fix.
     pub fn new(
         fix: &Fix,
-        inertial: &mut PositionInertial,
+        inertial: &mut PositInertial,
         params: &Params,
         dt: f32,
         timestamp: f32,
     ) -> Self {
-        let gnss_dr = PositionEarthUnits::from_fix_dr(fix, timestamp);
+        let gnss_dr = PositEarthUnits::from_fix_dr(fix, timestamp);
 
         inertial.update(params, dt);
 
@@ -103,10 +101,10 @@ impl PositionFused {
 
 /// A simple intertial position. Units are in m and m/s. The reference (ie 0 pt) is arbitrary.
 #[derive(Default)]
-pub struct PositionInertial {
+pub struct PositInertial {
     /// This anchor is what we add the other readings to. It's not necessarily dead-recocking,
     /// but the info we need is the same as that struct.
-    pub anchor: PositionEarthUnits,
+    pub anchor: PositEarthUnits,
     // pub anchor_heading: f32,
     pub x: f32,
     pub y: f32,
@@ -116,7 +114,7 @@ pub struct PositionInertial {
     pub v_z: f32,
 }
 
-impl PositionInertial {
+impl PositInertial {
     /// Update position intertially. Attitude is the aircraft's orientation
     /// relative to the earth's surface. Note that we don't use the gyro readings
     /// directly here. (We use accel readings). We use gyro readings as part of
@@ -131,69 +129,76 @@ impl PositionInertial {
         // todo: You could normalize these vecs such as mag and accel. Use this to help
         // todo with linear accel, and to calibrate
 
+        let mut accel_vec = Vec3::new(params.a_x, -params.a_y, params.a_z);
+        let mut mag_vec = Vec3::new(-params.mag_x, -params.mag_y, params.mag_z);
 
-        let accel_vec = Vec3::new(params.a_x, -params.a_y, params.a_z);
-        let mag_vec = Vec3::new(-params.mag_x, -params.mag_y, params.mag_z);
+        // println!("Accel mag: {}", accel_vec.magnitude());
+        // println!("Magnetic mag: {}", mag_vec.magnitude());
 
-        let accel_norm = accel_vec.to_normalized();
-        let accel_mag = accel_vec.magnitude();
+        let accel_mag = 10.084;
+        let mag_mag = 1.0722; // gauss
+        let local_mag_str = 0.47;
 
-        const UP: Vec3 = Vec3 {
-            x: 0.,
-            y: 0.,
-            z: 1.,
-        };
-        const FORWARD: Vec3 = Vec3 {
-            x: 0.,
-            y: 1.,
-            z: 0.,
-        };
+        accel_vec *= crate::G / accel_mag;
+        // mag_vec *= local_mag_str / mag_mag;
+
+        // todo: Impl formal calibration somehow. Ideally of all 3 axes.
+        // accel_vec.x *= (crate::G / 9.8)
 
         // We use up, because that's where earth acceleration points.
-        let att_from_accel = Quaternion::from_unit_vecs(UP, accel_norm);
+        let position = PositEarthUnits {
+            lat_e8: 3500000000,
+            lon_e8: -7800000000,
+            elevation_msl: 0.,
+        };
 
-        let att_from_mag = Quaternion::from_unit_vecs(FORWARD, mag_vec.to_normalized());
+        let att_accel = crate::attitude::att_from_accel(accel_vec);
+        let att_mag = crate::attitude::att_from_mag(mag_vec, &position);
 
-        // let mut accel_vec_earth_ref = params.attitude_quat.rotate_vec(accel_norm);
-        let mut accel_vec_earth_ref = att_from_accel.inverse().rotate_vec(accel_norm);
-
-
-        accel_vec_earth_ref *= accel_mag;
-        accel_vec_earth_ref.z -= G;
+        let accel_lin = crate::attitude::get_linear_accel(accel_vec, att_accel);
 
         self.x += self.v_x * dt;
         self.y += self.v_y * dt;
         self.z += self.v_z * dt;
-        self.v_x += accel_vec_earth_ref.x * dt;
-        self.v_y += accel_vec_earth_ref.y * dt;
-        self.v_z += accel_vec_earth_ref.z * dt;
+        self.v_x += accel_lin.x * dt;
+        self.v_y += accel_lin.y * dt;
+        self.v_z += accel_lin.z * dt;
 
         static mut i: u32 = 0;
 
         unsafe { i += 1 };
 
         if unsafe { i } % 2000 == 0 {
+            let euler = params.attitude_quat.to_euler();
+            let euler_acc = att_accel.to_euler();
+            let euler_mag = att_mag.to_euler();
 
-
-            // let euler = params.attitude_quat.to_euler();
-            let euler = att_from_accel.to_euler();
-            let euler_mag = att_from_mag.to_euler();
-
-            println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
-            println!("Att mag: p{} r{} y{}", euler_mag.pitch, euler_mag.roll, euler_mag.yaw);
-
-            println!("mag vec: x{} y{} z{}", mag_vec.to_normalized().x, mag_vec.to_normalized().y, mag_vec.to_normalized().z);
-
-
-            println!("Acc: x{} y{} z{}", params.a_x, params.a_y, params.a_z);
+            // println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
             println!(
-                "Acc norm: x{} y{} z{}",
-                accel_norm.x, accel_norm.y, accel_norm.z
+                "\n\nAtt acc: p{} r{} y{}",
+                euler_acc.pitch, euler_acc.roll, euler_acc.yaw
             );
             println!(
-                "Acc E: x{} y{} z{}",
-                accel_vec_earth_ref.x, accel_vec_earth_ref.y, accel_vec_earth_ref.z
+                "Att mag: p{} r{} y{}",
+                euler_mag.pitch, euler_mag.roll, euler_mag.yaw
             );
+
+            println!(
+                "mag vec: x{} y{} z{}",
+                mag_vec.to_normalized().x,
+                mag_vec.to_normalized().y,
+                mag_vec.to_normalized().z
+            );
+            println!("Acc: x{} y{} z{}", accel_vec.x, accel_vec.y, accel_vec.z);
+
+            // println!(
+            //     "Acc norm: x{} y{} z{}",
+            //     accel_norm.x, accel_norm.y, accel_norm.z
+            // );
+            // println!(
+            //     "Acc E: x{} y{} z{}",
+            //     accel_vec_earth_ref.x, accel_vec_earth_ref.y, accel_vec_earth_ref.z
+            // );
 
             println!(
                 "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
@@ -206,17 +211,17 @@ impl PositionInertial {
     pub fn update_anchor(&mut self, fix: &Fix) {
         // todo: For now, we accept the whole fix. In the future, weight with our inertial position.
 
-        self.anchor = PositionEarthUnits {
+        self.anchor = PositEarthUnits {
             lat_e8: fix.lat as i64 * 10,
             lon_e8: fix.lon as i64 * 10,
             elevation_msl: fix.elevation_msl as f32 / 1_000.,
         };
     }
 
-    pub fn get_earth_units(&self) -> PositionEarthUnits {
+    pub fn get_earth_units(&self) -> PositEarthUnits {
         let (lat, lon) = augment_latlon(self.anchor.lat_e8, self.anchor.lon_e8, self.y, self.x);
 
-        PositionEarthUnits {
+        PositEarthUnits {
             lat_e8: lat,
             lon_e8: lon,
             elevation_msl: (self.anchor.elevation_msl as f32) / 1_000. + self.z,
@@ -226,14 +231,14 @@ impl PositionInertial {
 
 /// Lat and lon are x 1e8, and alt in m. We use this for several things.
 #[derive(Clone, Default)]
-pub struct PositionEarthUnits {
+pub struct PositEarthUnits {
     pub lat_e8: i64,
     pub lon_e8: i64,
     /// meters
     pub elevation_msl: f32,
 }
 
-impl PositionEarthUnits {
+impl PositEarthUnits {
     /// Apply dead-reckoning to the most recent GNSS fix. This is what we fuse with inertial data.
     /// Returns a result with lat, lon, and alt as f32.
     /// time is in seconds.

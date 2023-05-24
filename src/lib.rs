@@ -1,32 +1,24 @@
 #![no_std]
 
-//! This module contains code related to using sensor fusion to create an attitude platform. It also includes code for interpreting, integrating,
-//! and taking the derivatives of sensor readings. Code here is device-agnostic.
+//! This module contains code for determing attitude and heading, as well a sensor
+//! fusion with locaiton.
 //!
-//! Some IMUs can integrate with a magnetometer and do some sensor fusion; we use
-//! software since it's more general, flexible, and device-agnostic.
+//! To determine attitude, it fuses acceleeration, gyro, and mag data, 3D each.
 //!
-//! From HyperShield: "Unscented will not offer any improvement over EKF. The reason for this is
-//! that your quadrotor will mainly stay near hover (because of the assumption that gravity
-//! will be the dominant acceleration) so the system will appear quasi-linear. If you want to go
-//! agile flight then UKF might offer improvements, but then you can't rely on the gravity assumption.
-//! There are attitude estimators like the hua filter that circumvents this (it estimates the
-//! acceleration in the inertial frame and uses that for prediction instead assuming it's equal
-//! to the gravity vector)."
+//!Conventions We define +X to be right, +Y to be forward and
+//! +Z to be u. We use the right hand rule for rotations along these axes.
 //!
-//! Python guide: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python
-//!
-//! [Youtube video: Phil's Lab](https://www.youtube.com/watch?v=hQUkiC5o0JI)
-//!
-//! Important: We define X to be left/right (pitch), Y to be forward/back (roll, and
-//! Z to be up/down (yaw)
+//! Magnetic inclination chart: https://upload.wikimedia.org/wikipedia/commons/d/de/World_Magnetic_Inclination_2015.pdf
+//! https://www.magnetic-declination.com/
 
-mod ahrs_fusion;
+pub mod attitude;
 pub mod params;
 pub mod ppks;
 
-pub use ahrs_fusion::{Ahrs, Settings};
-pub use params::Params;
+pub use crate::{
+    attitude::{Ahrs, Settings},
+    params::Params,
+};
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 use lin_alg2::f32::{Mat3, Quaternion, Vec3};
@@ -51,11 +43,23 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 // error-state EKF
 // http://www.iri.upc.edu/people/jsola/JoanSola/objectes/notes/kinematics.pdf
 
-impl Default for FixType {
-    fn default() -> Self {
-        Self::NoFix
-    }
-}
+pub const G: f32 = 9.80665; // Gravity, in m/s^2
+
+pub const UP: Vec3 = Vec3 {
+    x: 0.,
+    y: 0.,
+    z: 1.,
+};
+pub const FORWARD: Vec3 = Vec3 {
+    x: 0.,
+    y: 1.,
+    z: 0.,
+};
+pub const RIGHT: Vec3 = Vec3 {
+    x: 1.,
+    y: 0.,
+    z: 0.,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
@@ -68,6 +72,12 @@ pub enum FixType {
     /// GNSS + dead reckoning combined
     Combined = 4,
     TimeOnly = 5,
+}
+
+impl Default for FixType {
+    fn default() -> Self {
+        Self::NoFix
+    }
 }
 
 #[derive(Default)]
@@ -163,7 +173,7 @@ pub fn get_attitude(
     let gyro_data = Vec3 {
         x: imu_readings.v_pitch,
         y: imu_readings.v_roll,
-        z: -imu_readings.v_yaw,
+        z: imu_readings.v_yaw,
     };
     let gyro_data = Vec3::new_zero();
 

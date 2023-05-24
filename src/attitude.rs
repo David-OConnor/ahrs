@@ -1,25 +1,12 @@
-//! AHRS fusion filter, for attaining an attitude platform from a 3-axis acceleratometer, gyro, and optionally
-//! magnetometer. Based on a variant by Madgwick (By, not the?)
-//! https://ahrs.readthedocs.io/en/latest/filters/madgwick.html:
+//! Calculate attitude gven a 9-axis IMU.
 //!
-//! "This is an orientation filter applicable to IMUs consisting of tri-axial gyroscopes and accelerometers,
-//! and MARG arrays, which also include tri-axial magnetometers, proposed by Sebastian Madgwick [Madgwick].
-//! The filter employs a quaternion representation of orientation to describe the nature of orientations
-//! in three-dimensions and is not subject to the singularities associated with an Euler
-//! angle representation, allowing accelerometer and magnetometer data to be used in an analytically
-//! derived and optimised gradient-descent algorithm to compute the direction of the gyroscope
-//! measurement error as a quaternion derivative.
 //!
-//! This library is a translation of the original algorithm below:
-//! [AHRS](https://github.com/xioTechnologies/Fusion)
-//! " The algorithm is based on the revised AHRS algorithm presented in chapter 7 of Madgwick's
-//! PhD thesis. This is a different algorithm to the better-known initial AHRS algorithm presented in chapter 3,
-//! commonly referred to as the Madgwick algorithm."
-//!
-//! https://courses.cs.washington.edu/courses/cse466/14au/labs/l4/madgwick_internal_report.pdf
-//! https://github.com/chris1seto/OzarkRiver/tree/4channel/FlightComputerFirmware/Src/Madgwick
-//! https://github.com/bjohnsonfl/Madgwick_Filter
-//! https://github.com/chris1seto/OzarkRiver/blob/main/FlightComputerFirmware/Src/ImuAhrs.c
+//! todo: Use magnetic inclination, declination, and strength
+
+// todo: Calibrate mag and acc based on known gravity value, and known magnetic strength at the current
+// todo position, if known.
+
+// todo: We are currently moving away from the AHRS Fusion port.
 
 use core::f32::consts::TAU;
 
@@ -27,7 +14,7 @@ use num_traits::float::Float; // abs etc
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-const G: f32 = 9.80665; // Gravity, in m/s^2
+use crate::{ppks::PositEarthUnits, FORWARD, RIGHT, UP};
 
 // Cutoff frequency in Hz. (from FusionOffset)
 const CUTOFF_FREQUENCY: f32 = 0.02;
@@ -45,37 +32,12 @@ const INITIAL_GAIN: f32 = 10.0;
 // Initialisation period in seconds.
 const INITIALISATION_PERIOD: f32 = 3.0;
 
-const UP: Vec3 = Vec3 {
-    x: 0.,
-    y: 0.,
-    z: 1.,
-};
-const FORWARD: Vec3 = Vec3 {
-    x: 0.,
-    y: 1.,
-    z: 0.,
-};
-const RIGHT: Vec3 = Vec3 {
-    x: 1.,
-    y: 0.,
-    z: 0.,
-};
-
 fn is_zero(v: Vec3) -> bool {
     const EPS: f32 = 0.00001;
     v.x.abs() < EPS && v.y.abs() < EPS && v.z.abs() < EPS
 }
 
-#[derive(Clone, Copy)]
-pub enum AxisConvention {
-    NorthWestUp,
-    EastNorthUp,
-    NorthEastDown,
-}
-
-/// AHRS algorithm settings. Field doc comments here are from [the readme](https://github.com/xioTechnologies/Fusion).
 pub struct Settings {
-    pub convention: AxisConvention,
     /// The algorithm calculates the orientation as the integration of the gyroscope
     /// summed with a feedback term. The feedback term is equal to the error in the current measurement
     /// of orientation as determined by the other sensors, multiplied by a gain. The algorithm therefore
@@ -123,7 +85,7 @@ impl Settings {
     /// See above field descriptions for why we use these defaults.
     pub fn new(dt: f32) -> Self {
         Self {
-            convention: AxisConvention::EastNorthUp,
+            // convention: AxisConvention::EastNorthUp,
             gain: 0.5,
             accel_rejection: 0.1745,
             magnetic_rejection: 0.35,
@@ -237,10 +199,10 @@ impl Ahrs {
         let accel_norm = accel_data.to_normalized();
         let accel_mag = accel_data.magnitude();
         // We use up, because that's where earth acceleration points.
-        let att_from_accel = Quaternion::from_unit_vecs(UP, accel_norm);
+        let att_from_accel = Quaternion::from_unit_vecs(crate::UP, accel_norm);
 
         // let half_gravity = self.half_gravity();
-        // let half_gravity = Vec3::new_zero(); // todo temp
+        let half_gravity = Vec3::new_zero(); // todo temp
 
         // Calculate accelerometer feedback
         let mut half_accelerometer_feedback = Vec3::new_zero();
@@ -276,12 +238,12 @@ impl Ahrs {
 
         match mag_data {
             Some(mag) => {
-                let att_from_mag = Quaternion::from_unit_vecs(FORWARD, mag.to_normalized());
+                let att_from_mag = Quaternion::from_unit_vecs(crate::FORWARD, mag.to_normalized());
 
                 // Set to compass heading if magnetic rejection times out
                 self.mag_rejection_timeout = false;
                 if self.mag_rejection_timer > self.settings.rejection_timeout {
-                    self.set_heading(compass_calc_heading(half_gravity, mag));
+                    // self.set_heading(compass_calc_heading(half_gravity, mag));
                     self.mag_rejection_timer = 0;
                     self.mag_rejection_timeout = true;
                 }
@@ -317,13 +279,7 @@ impl Ahrs {
             }
         }
 
-        let rot_x = Quaternion::from_axis_angle(RIGHT, gyro_data.x * dt);
-        let rot_y = Quaternion::from_axis_angle(FORWARD, gyro_data.y * dt);
-        let rot_z = Quaternion::from_axis_angle(UP, gyro_data.z * dt);
-
-        // todo: Rotation order?
-        let att_from_gyro = rot_x * rot_y * rot_z * self.quaternion;
-
+        let att_gyro = att_from_gyro(gyro_data, self.quaternion, dt);
 
         // Apply feedback to gyroscope
         let adjusted_half_gyro = gyro_data * 0.5
@@ -363,47 +319,6 @@ impl Ahrs {
     //     // Update AHRS algorithm
     //     self.update(gyroscope, accelerometer, magnetometer, dt);
     // }
-
-    // todo: Freestanding fn of accel data and att.
-    /// Returns the linear acceleration measurement in  equal to the accelerometer
-    /// measurement with the 9.8m/s^2 of gravity removed. Result is in m/2^2.
-    pub fn get_linear_accel(&self) -> Vec3 {
-        let q = self.quaternion;
-
-        // let gravity = self.quaternion.rotate_vec(DOWN);
-        let gravity = Vec3 {
-            x: 2.0 * (q.x * q.z - q.w * q.y),
-            y: 2.0 * (q.y * q.z + q.w * q.x),
-            z: 2.0 * (q.w * q.w - 0.5 + q.z * q.z),
-        }; // third column of transposed rotation matrix
-
-        self.accelerometer - gravity
-    }
-
-    // todo: Freestanding fn of accel data and att.
-    /// Returns the Earth acceleration measurement equal to accelerometer
-    /// measurement in the Earth coordinate frame with the 9.8m/s^2 of gravity removed.
-    /// ahrs AHRS algorithm structure. Result is in m/2^2.
-    pub fn get_earth_accel(&self) -> Vec3 {
-        let q = self.quaternion;
-        let a = self.accelerometer;
-
-        let qwqw = q.w * q.w; // calculate common terms to avoid repeated operations
-        let qwqx = q.w * q.x;
-        let qwqy = q.w * q.y;
-        let qwqz = q.w * q.z;
-        let qxqy = q.x * q.y;
-        let qxqz = q.x * q.z;
-        let qyqz = q.y * q.z;
-
-        Vec3 {
-            x: 2.0 * ((qwqw - 0.5 + q.x * q.x) * a.x + (qxqy - qwqz) * a.y + (qxqz + qwqy) * a.z),
-            y: 2.0 * ((qxqy + qwqz) * a.x + (qwqw - 0.5 + q.y * q.y) * a.y + (qyqz - qwqx) * a.z),
-            z: (2.0 * ((qxqz - qwqy) * a.x + (qyqz + qwqx) * a.y + (qwqw - 0.5 + q.z * q.z) * a.z))
-                // - 1.0,
-                - G,
-        }
-    }
 
     /// Returns the AHRS algorithm internal states.
     fn _get_internal_states(&self) -> InternalStates {
@@ -547,17 +462,41 @@ impl Offset {
     }
 }
 
-/// Calculates the heading relative to magnetic north.
-/// Accelerometer measurement is in any calibrated units.
-/// Magnetometer measurement is in any calibrated units.
-/// return Heading angle in radians
-pub fn compass_calc_heading(accelerometer: Vec3, magnetometer: Vec3) -> f32 {
-    // Compute direction of magnetic west (Earth's y axis)
-    let magnetic_west = accelerometer.cross(magnetometer).to_normalized();
+/// Estimate attitude from accelerometer. This will fail when under
+/// linear acceleration. Apply calibration prior to this step.
+pub fn att_from_accel(accel: Vec3) -> Quaternion {
+    Quaternion::from_unit_vecs(UP, accel.to_normalized())
+}
 
-    // Compute direction of magnetic north (Earth's x axis)
-    let magnetic_north = magnetic_west.cross(accelerometer).to_normalized();
+/// Estimate attitude from magnetometer. This will fail when experiencing magnetic
+/// interference, and is noisy in general. Apply calibration prior to this step.
+pub fn att_from_mag(mag: Vec3, posit: &PositEarthUnits) -> Quaternion {
+    let inclination = -1.09; // radians.
+    let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
 
-    // Calculate angular heading relative to magnetic north
-    magnetic_west.x.atan2(magnetic_north.x)
+    let mag_field_vec = incl_rot.rotate_vec(FORWARD);
+
+    Quaternion::from_unit_vecs(mag_field_vec, mag.to_normalized())
+}
+
+/// Estimate attitude from gyroscopes. This will accumulate errors over time.
+/// dt is in seconds.
+pub fn att_from_gyro(gyro: Vec3, att_prev: Quaternion, dt: f32) -> Quaternion {
+    let rot_x = Quaternion::from_axis_angle(RIGHT, gyro.x * dt);
+    let rot_y = Quaternion::from_axis_angle(FORWARD, gyro.y * dt);
+    let rot_z = Quaternion::from_axis_angle(UP, gyro.z * dt);
+
+    // todo: Rotation order?
+    rot_x * rot_y * rot_z * att_prev
+}
+
+pub fn get_linear_accel(accel: Vec3, att: Quaternion) -> Vec3 {
+    let mut accel_vec_earth_ref = att.rotate_vec(accel.to_normalized());
+
+    let accel_mag = accel.magnitude();
+
+    accel_vec_earth_ref *= accel_mag;
+    accel_vec_earth_ref.z -= crate::G;
+
+    accel_vec_earth_ref
 }
