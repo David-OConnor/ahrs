@@ -45,14 +45,19 @@ const INITIAL_GAIN: f32 = 10.0;
 // Initialisation period in seconds.
 const INITIALISATION_PERIOD: f32 = 3.0;
 
-const DOWN: Vec3 = Vec3 {
+const UP: Vec3 = Vec3 {
     x: 0.,
     y: 0.,
-    z: -1.,
+    z: 1.,
 };
 const FORWARD: Vec3 = Vec3 {
     x: 0.,
     y: 1.,
+    z: 0.,
+};
+const RIGHT: Vec3 = Vec3 {
+    x: 1.,
+    y: 0.,
     z: 0.,
 };
 
@@ -231,15 +236,14 @@ impl Ahrs {
 
         let accel_norm = accel_data.to_normalized();
         let accel_mag = accel_data.magnitude();
-        let att_from_accel = Quaternion::from_unit_vecs(DOWN, accel_norm);
+        // We use up, because that's where earth acceleration points.
+        let att_from_accel = Quaternion::from_unit_vecs(UP, accel_norm);
 
         // let half_gravity = self.half_gravity();
-        let half_gravity = Vec3::new_zero(); // todo temp
+        // let half_gravity = Vec3::new_zero(); // todo temp
 
         // Calculate accelerometer feedback
         let mut half_accelerometer_feedback = Vec3::new_zero();
-
-        let att_from_accel = Quaternion::from_unit_vecs(DOWN, accel_data.to_normalized());
 
         // Enter acceleration recovery state if acceleration rejection times out
         if self.accel_rejection_timer > self.settings.rejection_timeout {
@@ -313,6 +317,14 @@ impl Ahrs {
             }
         }
 
+        let rot_x = Quaternion::from_axis_angle(RIGHT, gyro_data.x * dt);
+        let rot_y = Quaternion::from_axis_angle(FORWARD, gyro_data.y * dt);
+        let rot_z = Quaternion::from_axis_angle(UP, gyro_data.z * dt);
+
+        // todo: Rotation order?
+        let att_from_gyro = rot_x * rot_y * rot_z * self.quaternion;
+
+
         // Apply feedback to gyroscope
         let adjusted_half_gyro = gyro_data * 0.5
             + (half_accelerometer_feedback + half_magnetometer_feedback) * self.ramped_gain;
@@ -320,7 +332,6 @@ impl Ahrs {
         // Integrate rate of change of quaternion
         self.quaternion = self.quaternion + (self.quaternion * (adjusted_half_gyro * dt));
 
-        // Normalise quaternion
         self.quaternion = self.quaternion.to_normalized();
     }
 

@@ -6,7 +6,7 @@
 // use crate::{ppks::PositionFused};
 
 use crate::ImuReadings;
-use lin_alg2::f32::Quaternion;
+use lin_alg2::f32::{Vec3, Quaternion};
 
 /// Aircraft flight parameters, at a given instant. Pitch and roll rates are in the aircraft's
 /// frame of reference.
@@ -48,6 +48,10 @@ pub struct Params {
     pub a_pitch: f32,
     pub a_roll: f32,
     pub a_yaw: f32,
+
+    pub mag_x: f32,
+    pub mag_y: f32,
+    pub mag_z: f32,
 }
 
 impl Params {
@@ -56,6 +60,7 @@ impl Params {
     pub fn update_from_imu_readings(
         &mut self,
         imu_data: &ImuReadings,
+        mag_data: Option<Vec3>,
         attitude: Quaternion,
         dt: f32,
     ) {
@@ -82,6 +87,13 @@ impl Params {
         // self.s_pitch = euler.pitch;
         // self.s_roll = euler.roll;
         // self.s_yaw_heading = euler.yaw;
+
+        if let Some(mag) = mag_data {
+            self.mag_x = mag.x;
+            self.mag_y = mag.y;
+            self.mag_z = mag.z;
+        }
+
     }
 
     // todo: PUt back once you merge PPKS to this mod.

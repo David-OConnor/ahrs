@@ -128,15 +128,20 @@ impl PositionInertial {
         params: &Params,
         dt: f32, // seconds
     ) {
-        let accel_vec = Vec3::new(params.a_x, params.a_y, params.a_z);
+        // todo: You could normalize these vecs such as mag and accel. Use this to help
+        // todo with linear accel, and to calibrate
+
+
+        let accel_vec = Vec3::new(params.a_x, -params.a_y, params.a_z);
+        let mag_vec = Vec3::new(-params.mag_x, -params.mag_y, params.mag_z);
 
         let accel_norm = accel_vec.to_normalized();
         let accel_mag = accel_vec.magnitude();
 
-        const DOWN: Vec3 = Vec3 {
+        const UP: Vec3 = Vec3 {
             x: 0.,
             y: 0.,
-            z: -1.,
+            z: 1.,
         };
         const FORWARD: Vec3 = Vec3 {
             x: 0.,
@@ -144,12 +149,17 @@ impl PositionInertial {
             z: 0.,
         };
 
-        let att_from_accel = Quaternion::from_unit_vecs(DOWN, accel_norm);
-        // let att_from_mag = Quaternion::from_unit_vecs(FORWARD, mag.to_normalized());
+        // We use up, because that's where earth acceleration points.
+        let att_from_accel = Quaternion::from_unit_vecs(UP, accel_norm);
 
-        let mut accel_vec_earth_ref = params.attitude_quat.rotate_vec(accel_norm);
-        // accel_vec_earth_ref *= accel_mag;
-        // accel_vec_earth_ref.z -= G;
+        let att_from_mag = Quaternion::from_unit_vecs(FORWARD, mag_vec.to_normalized());
+
+        // let mut accel_vec_earth_ref = params.attitude_quat.rotate_vec(accel_norm);
+        let mut accel_vec_earth_ref = att_from_accel.inverse().rotate_vec(accel_norm);
+
+
+        accel_vec_earth_ref *= accel_mag;
+        accel_vec_earth_ref.z -= G;
 
         self.x += self.v_x * dt;
         self.y += self.v_y * dt;
@@ -163,10 +173,18 @@ impl PositionInertial {
         unsafe { i += 1 };
 
         if unsafe { i } % 2000 == 0 {
+
+
             // let euler = params.attitude_quat.to_euler();
             let euler = att_from_accel.to_euler();
+            let euler_mag = att_from_mag.to_euler();
 
             println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+            println!("Att mag: p{} r{} y{}", euler_mag.pitch, euler_mag.roll, euler_mag.yaw);
+
+            println!("mag vec: x{} y{} z{}", mag_vec.to_normalized().x, mag_vec.to_normalized().y, mag_vec.to_normalized().z);
+
+
             println!("Acc: x{} y{} z{}", params.a_x, params.a_y, params.a_z);
             println!(
                 "Acc norm: x{} y{} z{}",
