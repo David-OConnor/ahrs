@@ -126,11 +126,24 @@ impl PositInertial {
         params: &Params,
         dt: f32, // seconds
     ) {
-        // todo: You could normalize these vecs such as mag and accel. Use this to help
-        // todo with linear accel, and to calibrate
 
-        let mut accel_vec = Vec3::new(params.a_x, -params.a_y, params.a_z);
-        let mut mag_vec = Vec3::new(-params.mag_x, -params.mag_y, params.mag_z);
+        // todo: Using this to experiment with new att platform
+        let mut accel_data = Vec3 {
+            x: params.a_x,
+            y: -params.a_y, // negative due to our IMU's coord system.
+            z: params.a_z,
+        };
+
+        let gyro_data = Vec3 {
+            x: params.v_pitch,
+            y: params.v_roll,
+            z: params.v_yaw,
+        };
+        let mag_data = Vec3 {
+            x: -params.mag_y, // negative due to our mag's coord systeparams.mag_.
+            y: -params.mag_x,
+            z: params.mag_z,
+        };
 
         // println!("Accel mag: {}", accel_vec.magnitude());
         // println!("Magnetic mag: {}", mag_vec.magnitude());
@@ -139,11 +152,11 @@ impl PositInertial {
         let mag_mag = 1.0722; // gauss
         let local_mag_str = 0.47;
 
-        accel_vec *= crate::G / accel_mag;
-        // mag_vec *= local_mag_str / mag_mag;
+        // accel_data *= crate::G / accel_mag;
+        // mag_data *= local_mag_str / mag_mag;
 
         // todo: Impl formal calibration somehow. Ideally of all 3 axes.
-        // accel_vec.x *= (crate::G / 9.8)
+        // accel_data.x *= (crate::G / 9.8)
 
         // We use up, because that's where earth acceleration points.
         let position = PositEarthUnits {
@@ -152,10 +165,11 @@ impl PositInertial {
             elevation_msl: 0.,
         };
 
-        let att_accel = crate::attitude::att_from_accel(accel_vec);
-        let att_mag = crate::attitude::att_from_mag(mag_vec, &position);
+        let inclination = -1.09;
+        let att_accel = crate::attitude::att_from_accel(accel_data);
+        let att_mag = crate::attitude::att_from_mag(mag_data, inclination);
 
-        let accel_lin = crate::attitude::get_linear_accel(accel_vec, att_accel);
+        let accel_lin = crate::attitude::get_linear_accel(accel_data, att_accel);
 
         self.x += self.v_x * dt;
         self.y += self.v_y * dt;
@@ -169,13 +183,15 @@ impl PositInertial {
         unsafe { i += 1 };
 
         if unsafe { i } % 2000 == 0 {
-            let euler = params.attitude_quat.to_euler();
+            let euler = params.attitude.to_euler();
             let euler_acc = att_accel.to_euler();
             let euler_mag = att_mag.to_euler();
 
-            // println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+            println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+
+            println!("Acclen: {}", accel_data.magnitude());
             println!(
-                "\n\nAtt acc: p{} r{} y{}",
+                "Att acc: p{} r{} y{}",
                 euler_acc.pitch, euler_acc.roll, euler_acc.yaw
             );
             println!(
@@ -185,11 +201,11 @@ impl PositInertial {
 
             println!(
                 "mag vec: x{} y{} z{}",
-                mag_vec.to_normalized().x,
-                mag_vec.to_normalized().y,
-                mag_vec.to_normalized().z
+                mag_data.to_normalized().x,
+                mag_data.to_normalized().y,
+                mag_data.to_normalized().z
             );
-            println!("Acc: x{} y{} z{}", accel_vec.x, accel_vec.y, accel_vec.z);
+            println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
 
             // println!(
             //     "Acc norm: x{} y{} z{}",
@@ -197,7 +213,7 @@ impl PositInertial {
             // );
             // println!(
             //     "Acc E: x{} y{} z{}",
-            //     accel_vec_earth_ref.x, accel_vec_earth_ref.y, accel_vec_earth_ref.z
+            //     accel_data_earth_ref.x, accel_data_earth_ref.y, accel_data_earth_ref.z
             // );
 
             println!(

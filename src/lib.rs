@@ -16,7 +16,7 @@ pub mod params;
 pub mod ppks;
 
 pub use crate::{
-    attitude::{Ahrs, Settings},
+    attitude::{Ahrs},
     params::Params,
 };
 
@@ -207,14 +207,14 @@ pub fn get_attitude(
                 z: m.z,
             };
 
-            ahrs.update(gyro_data, accel_data, Some(mag_data), dt);
+            ahrs.update(gyro_data, accel_data, Some(mag_data));
         }
         None => {
-            ahrs.update(gyro_data, accel_data, None, dt);
+            ahrs.update(gyro_data, accel_data, None);
         }
     }
 
-    ahrs.quaternion
+    ahrs.attitude
 }
 
 /// Output: m/s^2, or Output: rad/s.

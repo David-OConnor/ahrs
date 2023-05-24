@@ -28,7 +28,7 @@ pub struct Params {
     // /// Ie heading
     // pub s_yaw_heading: f32,
     /// Quaternion of the attitude.
-    pub attitude_quat: Quaternion,
+    pub attitude: Quaternion,
     // todo: AHRS quaternion field, or leave that as part of the `AHRS` struct?
 
     // Velocity
@@ -81,7 +81,7 @@ impl Params {
         self.a_y = imu_data.a_y;
         self.a_z = imu_data.a_z;
 
-        self.attitude_quat = attitude;
+        self.attitude = attitude;
 
         // let euler = attitude.to_euler();
         // self.s_pitch = euler.pitch;
