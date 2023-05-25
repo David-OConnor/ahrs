@@ -61,6 +61,17 @@ pub const RIGHT: Vec3 = Vec3 {
     z: 0.,
 };
 
+/// Apply this linear map to raw IMU readings to get calibrated ones, that should always
+/// return 1G of acceleration if no linear acceleration is applied.
+pub struct AccelCal {
+    pub slope_x: f32,
+    pub intercept_x: f32,
+    pub slope_y: f32,
+    pub intercept_y: f32,
+    pub slope_z: f32,
+    pub intercept_z: f32,
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 pub enum FixType {
@@ -164,6 +175,10 @@ pub fn get_attitude(
     // Pitch nose up, roll right wing down, yaw CCW
     // LIS3 mat: X left, Y back, z up
 
+    // Important: The ICM42688 is inconsistent about left-hand-rule vs right-hand-rule
+    // re its gyro and mag readings. We must take this into account. It uses RHR for Z and X,
+    // and LHR for Y.
+
     let accel_data = Vec3 {
         x: imu_readings.a_x,
         y: -imu_readings.a_y, // negative due to our IMU's coord system.
@@ -175,7 +190,7 @@ pub fn get_attitude(
         y: imu_readings.v_roll,
         z: imu_readings.v_yaw,
     };
-    let gyro_data = Vec3::new_zero();
+    // let gyro_data = Vec3::new_zero();
 
     // Apply calibration
     // todo: Come back to this.

@@ -166,7 +166,7 @@ impl PositInertial {
         };
 
         let inclination = -1.09;
-        let att_accel = crate::attitude::att_from_accel(accel_data);
+        let att_accel = crate::attitude::att_from_accel(accel_data, 0.);
         let att_mag = crate::attitude::att_from_mag(mag_data, inclination);
 
         let accel_lin = crate::attitude::get_linear_accel(accel_data, att_accel);

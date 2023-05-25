@@ -18,454 +18,13 @@ use crate::{ppks::PositEarthUnits, FORWARD, RIGHT, UP};
 
 use defmt::println;
 
-// // Cutoff frequency in Hz. (from FusionOffset)
-// const CUTOFF_FREQUENCY: f32 = 0.02;
-//
-// // Timeout in seconds. (from FusionOffset)
-// const TIMEOUT: u32 = 5;
-//
-// // Threshold in radians per second. (from FusionOffset)
-// const THRESHOLD: f32 = 0.05236;
-//
-// // Initial gain used during the initialisation.
-// // const INITIAL_GAIN: f32 = 10.0 * 360. / TAU;
-// const INITIAL_GAIN: f32 = 10.0;
-//
-// // Initialisation period in seconds.
-// const INITIALISATION_PERIOD: f32 = 3.0;
-//
-
-//
-// pub struct Settings {
-//     /// The algorithm calculates the orientation as the integration of the gyroscope
-//     /// summed with a feedback term. The feedback term is equal to the error in the current measurement
-//     /// of orientation as determined by the other sensors, multiplied by a gain. The algorithm therefore
-//     /// functions as a complementary filter that combines high-pass filtered gyroscope measurements
-//     /// with low-pass filtered measurements from other sensors with a corner frequency determined by
-//     /// the gain. A low gain will 'trust' the gyroscope more and so be more susceptible to drift. A
-//     /// high gain will increase the influence of other sensors and the errors that result from
-//     /// accelerations and magnetic distortions. A gain of zero will ignore the other sensors so that
-//     /// the measurement of orientation is determined by only the gyroscope.
-//     ///
-//     /// Determines the influence of the gyroscope relative to other sensors. A value of 0.5 is
-//     /// appropriate for most applications.
-//     pub gain: f32,
-//     /// The acceleration rejection feature reduces the errors that result from the accelerations
-//     /// of linear and rotational motion. Acceleration rejection works by comparing the
-//     /// instantaneous measurement of inclination provided by the accelerometer with the
-//     /// current measurement of inclination of the algorithm output. If the angular difference
-//     /// between these two inclinations is greater than a threshold then the accelerometer will
-//     /// be ignored for this algorithm update. This is equivalent to a dynamic gain that
-//     /// deceases as accelerations increase.
-//     /// In radians.
-//     ///
-//     /// Threshold (in degrees) used by the acceleration rejection feature. A value of zero will
-//     /// disable this feature. A value of 10 degrees is appropriate for most applications.
-//     pub accel_rejection: f32,
-//     /// The magnetic rejection feature reduces the errors that result from temporary magnetic
-//     /// distortions. Magnetic rejection works using the same principle as acceleration
-//     /// rejection operating on the magnetometer instead of the accelerometer and by comparing
-//     /// the measurements of heading instead of inclination. A magnetic rejection timeout will
-//     /// not cause the algorithm to reinitialise. If a magnetic rejection timeout occurs then
-//     /// the heading of the algorithm output will be set to the instantaneous measurement of heading
-//     /// provided by the magnetometer.
-//     /// In radians.
-//     ///
-//     /// Threshold (in degrees) used by the magnetic rejection feature. A value of zero will disable
-//     /// the feature. A value of 20 degrees is appropriate for most applications.
-//     pub magnetic_rejection: f32,
-//     /// Acceleration and magnetic rejection timeout period (in samples). A value of zero will
-//     /// disable the acceleration and magnetic rejection features. A period of 5 seconds is
-//     /// appropriate for most applications.
-//     pub rejection_timeout: u32,
-// }
-//
-// impl Settings {
-//     /// See above field descriptions for why we use these defaults.
-//     pub fn new(dt: f32) -> Self {
-//         Self {
-//             // convention: AxisConvention::EastNorthUp,
-//             gain: 0.5,
-//             accel_rejection: 0.1745,
-//             magnetic_rejection: 0.35,
-//             rejection_timeout: (5. * dt) as u32,
-//         }
-//     }
-// }
-//
-// /// AHRS algorithm structure.  Structure members are used internally and
-// /// must not be accessed by the application.
-// pub struct Ahrs {
-//     pub settings: Settings,
-//     /// The quaternion describing the sensor relative to the Earth.
-//     pub quaternion: Quaternion,
-//     pub accelerometer: Vec3,
-//     pub initialising: bool,
-//     pub ramped_gain: f32,
-//     pub ramped_gain_step: f32,
-//     pub half_accelerometer_feedback: Vec3,
-//     pub half_magnetometer_feedback: Vec3,
-//     pub accel_rejection_timer: u32,
-//     pub accel_rejection_timeout: bool,
-//     pub mag_rejection_timer: u32,
-//     pub mag_rejection_timeout: bool,
-//     pub offset: Offset,
-// }
-//
-// impl Ahrs {
-//     /// Initialises the AHRS algorithm structure.
-//     pub fn new(settings: &Settings, sample_rate: u32) -> Self {
-//         let mut result = Self {
-//             settings: Settings::new(sample_rate as f32),
-//             quaternion: Quaternion::new_identity(),
-//             accelerometer: Vec3::new_zero(),
-//             initialising: false,
-//             ramped_gain: 0.,
-//             ramped_gain_step: 0.,
-//             half_accelerometer_feedback: Vec3::new_zero(),
-//             half_magnetometer_feedback: Vec3::new_zero(),
-//             accel_rejection_timer: 0,
-//             accel_rejection_timeout: false,
-//             mag_rejection_timer: 0,
-//             mag_rejection_timeout: false,
-//             offset: Default::default(),
-//         };
-//
-//         result.set_settings(settings);
-//         result.reset();
-//         result.offset = Offset::new(sample_rate);
-//
-//         result
-//     }
-//
-//     /// Resets the AHRS algorithm.  This is equivalent to reinitialising the
-//     /// algorithm while maintaining the current settings.
-//     /// param ahrs AHRS algorithm structure.
-//     fn reset(&mut self) {
-//         self.quaternion = Quaternion::new_identity();
-//         self.accelerometer = Vec3::new_zero();
-//         self.initialising = true;
-//         self.ramped_gain = INITIAL_GAIN;
-//         self.half_accelerometer_feedback = Vec3::new_zero();
-//         self.half_magnetometer_feedback = Vec3::new_zero();
-//         self.accel_rejection_timer = 0;
-//         self.accel_rejection_timeout = false;
-//         self.mag_rejection_timer = 0;
-//         self.mag_rejection_timeout = false;
-//     }
-//
-//     /// Sets the AHRS algorithm settings.
-//     fn set_settings(&mut self, settings: &Settings) {
-//         self.settings.gain = settings.gain;
-//
-//         if settings.accel_rejection < 0.0001 || settings.rejection_timeout == 0 {
-//             self.settings.accel_rejection = f32::MAX;
-//         } else {
-//             self.settings.accel_rejection = (0.5 * settings.accel_rejection.sin()).powi(2);
-//         }
-//         if settings.magnetic_rejection < 0.0001 || settings.rejection_timeout == 0 {
-//             self.settings.magnetic_rejection = f32::MAX;
-//         } else {
-//             self.settings.magnetic_rejection = (0.5 * settings.magnetic_rejection.sin()).powi(2);
-//         }
-//
-//         self.settings.rejection_timeout = settings.rejection_timeout;
-//         if !self.initialising {
-//             self.ramped_gain = self.settings.gain;
-//         }
-//         self.ramped_gain_step = (INITIAL_GAIN - self.settings.gain) / INITIALISATION_PERIOD;
-//     }
-//
-//     /// Updates the AHRS algorithm using the gyroscope, accelerometer, and
-//     /// magnetometer measurements.
-//     /// Gyroscope measurement is in radians per second
-//     /// accelerometer Accelerometer measurement is in m/s^2.
-//     /// Magnetometer measurement is in arbitrary units.
-//     /// dt is in seconds.
-//     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>, dt: f32) {
-//         self.accelerometer = accel_data;
-//
-//         // Ramp down gain during initialisation
-//         if self.initialising {
-//             self.ramped_gain -= self.ramped_gain_step * dt;
-//             if self.ramped_gain < self.settings.gain {
-//                 self.ramped_gain = self.settings.gain;
-//                 self.initialising = false;
-//                 self.accel_rejection_timeout = false;
-//             }
-//         }
-//
-//         let accel_norm = accel_data.to_normalized();
-//         let accel_mag = accel_data.magnitude();
-//         // We use up, because that's where earth acceleration points.
-//         let att_from_accel = Quaternion::from_unit_vecs(crate::UP, accel_norm);
-//
-//         // let half_gravity = self.half_gravity();
-//         let half_gravity = Vec3::new_zero(); // todo temp
-//
-//         // Calculate accelerometer feedback
-//         let mut half_accelerometer_feedback = Vec3::new_zero();
-//
-//         // Enter acceleration recovery state if acceleration rejection times out
-//         if self.accel_rejection_timer > self.settings.rejection_timeout {
-//             let quaternion = self.quaternion;
-//             self.reset();
-//             self.quaternion = quaternion;
-//             self.accel_rejection_timer = 0;
-//             self.accel_rejection_timeout = true;
-//         }
-//
-//         // Calculate accelerometer feedback scaled by 0.5
-//         self.half_accelerometer_feedback = accel_data.to_normalized().cross(half_gravity);
-//
-//         // Ignore accelerometer if acceleration distortion detected
-//         if self.initialising
-//             || self.half_accelerometer_feedback.magnitude_squared() <= self.settings.accel_rejection
-//         {
-//             half_accelerometer_feedback = self.half_accelerometer_feedback;
-//             self.accel_rejection_timer -= if self.accel_rejection_timer >= 10 {
-//                 10
-//             } else {
-//                 0
-//             };
-//         } else {
-//             self.accel_rejection_timer += 1;
-//         }
-//
-//         // Calculate magnetometer feedback
-//         let mut half_magnetometer_feedback = Vec3::new_zero();
-//
-//         match mag_data {
-//             Some(mag) => {
-//                 let att_from_mag = Quaternion::from_unit_vecs(crate::FORWARD, mag.to_normalized());
-//
-//                 // Set to compass heading if magnetic rejection times out
-//                 self.mag_rejection_timeout = false;
-//                 if self.mag_rejection_timer > self.settings.rejection_timeout {
-//                     // self.set_heading(compass_calc_heading(half_gravity, mag));
-//                     self.mag_rejection_timer = 0;
-//                     self.mag_rejection_timeout = true;
-//                 }
-//
-//                 // Compute direction of west indicated by algorithm
-//                 // let half_magnetic = self.half_magnetic();
-//                 let half_magnetic = Vec3::new_zero(); // todo temp
-//
-//                 // Calculate magnetometer feedback scaled by 0.5
-//                 self.half_magnetometer_feedback =
-//                     half_gravity.cross(mag).to_normalized().cross(half_magnetic);
-//
-//                 // Ignore magnetometer if magnetic distortion detected
-//                 if self.initialising
-//                     || self.half_magnetometer_feedback.magnitude_squared()
-//                     <= self.settings.magnetic_rejection
-//                 {
-//                     half_magnetometer_feedback = self.half_magnetometer_feedback;
-//                     self.mag_rejection_timer -= if self.mag_rejection_timer >= 10 {
-//                         10
-//                     } else {
-//                         0
-//                     };
-//                 } else {
-//                     self.mag_rejection_timer += 1;
-//                 }
-//             }
-//             None => {
-//                 // Zero heading during initialisation
-//                 if self.initialising && !self.accel_rejection_timeout {
-//                     self.set_heading(0.0);
-//                 }
-//             }
-//         }
-//
-//         let att_gyro = att_from_gyro(gyro_data, self.quaternion, dt);
-//
-//         // Apply feedback to gyroscope
-//         let adjusted_half_gyro = gyro_data * 0.5
-//             + (half_accelerometer_feedback + half_magnetometer_feedback) * self.ramped_gain;
-//
-//         // Integrate rate of change of quaternion
-//         self.quaternion = self.quaternion + (self.quaternion * (adjusted_half_gyro * dt));
-//
-//         self.quaternion = self.quaternion.to_normalized();
-//     }
-//
-//     // /// Updates the AHRS algorithm using the gyroscope, accelerometer, and
-//     // /// heading measurements.
-//     // /// Gyroscope measurement is in radians per second.
-//     // /// Accelerometer is measured in m/s^2
-//     // /// Heading measurement is in radians per second.
-//     // /// dt is in seconds.
-//     // pub fn update_external_heading(
-//     //     &mut self,
-//     //     gyroscope: Vec3,
-//     //     accelerometer: Vec3,
-//     //     heading: f32,
-//     //     dt: f32,
-//     // ) {
-//     //     // Calculate roll
-//     //     let q = self.quaternion;
-//     //     let roll = (q.w * q.x + q.y * q.z).atan2(0.5 - q.y * q.y - q.x * q.x);
-//     //
-//     //     // Calculate magnetometer
-//     //     let sin_heading = heading.sin();
-//     //     let magnetometer = Vec3 {
-//     //         x: heading.cos(),
-//     //         y: -1.0 * roll.cos() * sin_heading,
-//     //         z: sin_heading * roll.sin(),
-//     //     };
-//     //
-//     //     // Update AHRS algorithm
-//     //     self.update(gyroscope, accelerometer, magnetometer, dt);
-//     // }
-//
-//     /// Returns the AHRS algorithm internal states.
-//     fn _get_internal_states(&self) -> InternalStates {
-//         let (accel_rejection_timer, magnetic_rejection_timer) =
-//             if self.settings.rejection_timeout == 0 {
-//                 (0., 0.)
-//             } else {
-//                 (
-//                     (self.accel_rejection_timer / self.settings.rejection_timeout) as f32,
-//                     (self.mag_rejection_timer / self.settings.rejection_timeout) as f32,
-//                 )
-//             };
-//
-//         InternalStates {
-//             accel_error: (2.0 * self.half_accelerometer_feedback.magnitude()).asin(),
-//             accel_rejection_timer,
-//             magnetic_error: (2.0 * self.half_magnetometer_feedback.magnitude()).asin(),
-//             magnetic_rejection_timer,
-//         }
-//     }
-//
-//     /// Returns the AHRS algorithm flags.
-//     fn _get_flags(&self) -> Flags {
-//         let warning_timeout = self.settings.rejection_timeout / 4;
-//
-//         Flags {
-//             initialising: self.initialising,
-//             accel_rejection_warning: self.accel_rejection_timer > warning_timeout,
-//             accel_rejection_timeout: self.accel_rejection_timeout,
-//             mag_rejection_warning: self.mag_rejection_timer > warning_timeout,
-//             mag_rejection_timeout: self.mag_rejection_timeout,
-//         }
-//     }
-//
-//     /// Sets the heading of the orientation measurement provided by the AHRS
-//     /// algorithm. This function can be used to reset drift in heading when the AHRS
-//     /// algorithm is being used without a magnetometer.
-//     fn set_heading(&mut self, heading: f32) {
-//         let q = self.quaternion;
-//
-//         let yaw = (q.w * q.z + q.x * q.y).atan2(0.5 - q.y * q.y - q.z * q.z);
-//         let half_yaw_minus_heading = 0.5 * (yaw - heading);
-//         let rotation = Quaternion {
-//             w: half_yaw_minus_heading.cos(),
-//             x: 0.0,
-//             y: 0.0,
-//             z: -1.0 * half_yaw_minus_heading.sin(),
-//         };
-//         self.quaternion = rotation * self.quaternion;
-//     }
-// }
-//
-// /// AHRS algorithm internal states.
-// /// Doc comments are from the Readme.
-// struct InternalStates {
-//     /// Angular error (in degrees) of the instantaneous measurement of inclination provided by the
-//     /// accelerometer. The acceleration rejection feature will ignore the accelerometer if this
-//     /// value exceeds the accelerationRejection threshold set in the algorithm settings.
-//     pub accel_error: f32,
-//     /// Acceleration rejection timer value normalised to between 0.0 and 1.0. An acceleration
-//     /// rejection timeout will occur when this value reaches 1.0.
-//     pub accel_rejection_timer: f32,
-//     /// Angular error (in radians) of the instantaneous measurement of heading provided by the
-//     /// magnetometer. The magnetic rejection feature will ignore the magnetometer if this value
-//     /// exceeds the magneticRejection threshold set in the algorithm settings.
-//     pub magnetic_error: f32,
-//     /// Magnetic rejection timer value normalised to between 0.0 and 1.0. A magnetic rejection
-//     /// timeout will occur when this value reaches 1.0.
-//     pub magnetic_rejection_timer: f32,
-// }
-//
-// /// AHRS algorithm flags.
-// /// Doc comments are from the Readme.
-// struct Flags {
-//     /// true if the algorithm is initialising.
-//     pub initialising: bool,
-//     /// true if the acceleration rejection timer has exceeded 25% of the rejectionTimeout value set
-//     /// in the algorithm settings.
-//     pub accel_rejection_warning: bool,
-//     /// true if an acceleration rejection timeout has occurred and the algorithm is initialising.
-//     pub accel_rejection_timeout: bool,
-//     /// true if the magnetic rejection timer has exceeded 25% of the rejectionTimeout value
-//     /// set in the algorithm settings.
-//     pub mag_rejection_warning: bool,
-//     /// true if a magnetic rejection timeout has occurred during the previous algorithm update.
-//     pub mag_rejection_timeout: bool,
-// }
-//
-// // todo: Should this be with the calibration code in sensor_fusion?
-// // todo: Should you have a separate imu_calibration module?
-// /// Gyroscope offset algorithm structure. Structure members are used
-// /// internally and must not be accessed by the application.
-// #[derive(Default)]
-// pub struct Offset {
-//     filter_coefficient: f32,
-//     timeout: u32,
-//     timer: u32,
-//     gyroscope_offset: Vec3,
-// }
-//
-// impl Offset {
-//     /// Initialises the gyroscope offset algorithm.
-//     /// Sample rate is in Hz.
-//     pub fn new(sample_rate: u32) -> Self {
-//         Self {
-//             // filter_coefficient: TAU * CUTOFF_FREQUENCY * (1. / sample_rate as f32),
-//             // todo: Do we want tau here? It's in the orig, but the orig uses degrees...
-//             filter_coefficient: TAU * CUTOFF_FREQUENCY * (1. / sample_rate as f32),
-//             timeout: TIMEOUT * sample_rate,
-//             timer: 0,
-//             gyroscope_offset: Vec3::new_zero(),
-//         }
-//     }
-//
-//     /// Updates the gyroscope offset algorithm and returns the corrected
-//     /// gyroscope measurement.
-//     /// Gyroscope measurement is in radians per second.
-//     /// return Corrected gyroscope measurement in radians per second.
-//     pub fn update(&mut self, gyroscope: Vec3) -> Vec3 {
-//         // Subtract offset from gyroscope measurement
-//         let gyroscope = gyroscope - self.gyroscope_offset;
-//
-//         // Reset timer if gyroscope not stationary
-//         if (gyroscope.x).abs() > THRESHOLD
-//             || (gyroscope.y).abs() > THRESHOLD
-//             || (gyroscope.z).abs() > THRESHOLD
-//         {
-//             self.timer = 0;
-//             return gyroscope;
-//         }
-//
-//         // Increment timer while gyroscope stationary
-//         if self.timer < self.timeout {
-//             self.timer += 1;
-//             return gyroscope;
-//         }
-//
-//         // Adjust offset if timer has elapsed
-//         self.gyroscope_offset = self.gyroscope_offset + (gyroscope * self.filter_coefficient);
-//         gyroscope
-//     }
-// }
-
 pub struct Ahrs {
     pub attitude: Quaternion,
     att_from_gyros: Quaternion,
-    // att_from_acc: Quaternion,
+    att_from_acc: Quaternion,
     // att_from_mag: Quaternion,
+    linear_acc_estimate: Vec3,
+    linear_acc_confidence: f32, // todo?
     /// Time between updates, in seconds.
     dt: f32,
     /// Timestamp, in seconds.
@@ -479,41 +38,72 @@ impl Ahrs {
         Self {
             attitude: Quaternion::new_identity(),
             att_from_gyros: Quaternion::new_identity(),
+            att_from_acc: Quaternion::new_identity(),
+            linear_acc_estimate: Vec3::new_zero(),
+            linear_acc_confidence: 0.,
             dt,
             timestamp: 0.,
         }
     }
 
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
-        let att_acc = att_from_accel(accel_data);
+        let heading_from_prev = 0.; // todo
+
+        let att_acc = att_from_accel(accel_data, heading_from_prev);
+
+        let att_acc_w_lin_removed = att_from_accel(accel_data - self.linear_acc_estimate, heading_from_prev);
+
+        let att_gyro = att_from_gyro(gyro_data, self.attitude, self.dt);
+
+        let diff_acc_gyro = att_acc * att_gyro.inverse();
+        let angle_diff_acc_gyro = diff_acc_gyro.angle();
+
+        // todo: Is this up, or down?
+        // todo: Inv, or normal?
+        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
+        let lin_acc_estimate = att_acc - grav_axis_from_att_gyro * (accel_data.magnitude() - G); // todo QC
+
+        self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
+
+
+        // If the magntidue of the acceleration is above this value, we are under linear acceleration,
+        // and should ignore the accelerometer.
+        let acc_magnitude_thresh_upper = crate::G * 1.2;  // todo setting somewhere
+        let acc_magnitude_thresh_lower = crate::G * 0.8;  // todo setting somewhere
+        // let acc_magntude_thresh = 7.;  // todo setting somewhere
+        // println!("mag: {}", accel_data.magnitude());
+
+        let accel_magnitude = accel_data.magnitude();
+        if accel_magnitude > acc_magnitude_thresh_upper || accel_magnitude < acc_magnitude_thresh_lower {
+            // We are under linear acceleration; ignore the accelerometer, and use the integrated
+            // gyro measurement.
+            // (todo: estimate the linear component, remove that, then incorporate acc data)
+        } else {
+            // If not under much acceleration, re-cage our attitude.
+            // todo: Partial, not full.
+            self.attitude = att_acc;
+        }
+
+        // todo: Ways to identify linear acceleration:
+        // - Greater or less than 1G of acceleration, if the accel is calibrated.
+        // - Discontinuities or other anomolies when integrating accel-based attitude over time,
+        // - or, along those lines, discontinuities etc when fusing with gyro.
+
+        // Identify the angle difference in the vector between the current attitude estimate, and that
+        // from the accelerometer alone.
+
+        // self.att_from_gyros = att_gyro;
+
+        // println!("att gyro: {:?}", att_gyro.x);
+
 
         match mag_data {
-
             Some(mag) => {
                 let incliantion = -1.09;
                 let att_mag = att_from_mag(mag, incliantion);
             }
             None => ()
         }
-
-        // If the magntidue of the acceleration is above this value, we are under linear acceleration,
-        // and should ignore the accelerometer.
-        let acc_magntide_thresh = crate::G * 1.2;  // todo setting somewhere
-        let acc_magntude_thresh = 7.;  // todo setting somewhere
-        // println!("mag: {}", accel_data.magnitude());
-
-        if accel_data.magnitude() > acc_magntude_thresh {
-
-        } else {
-            // If not under much acceleration, re-cage our attitude.
-            // todo: Partial, not full.
-            self.att_from_gyros = att_acc;
-        }
-
-        let att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
-        self.att_from_gyros = att_gyro;
-
-        // println!("att gyro: {:?}", att_gyro.x);
 
         self.attitude = att_gyro;
         self.timestamp += self.dt;
@@ -524,8 +114,16 @@ impl Ahrs {
 
 /// Estimate attitude from accelerometer. This will fail when under
 /// linear acceleration. Apply calibration prior to this step.
-pub fn att_from_accel(accel: Vec3) -> Quaternion {
-    Quaternion::from_unit_vecs(UP, accel.to_normalized())
+/// `heading` is in radians
+pub fn att_from_accel(accel: Vec3, heading: f32) -> Quaternion {
+    let accel_norm = accel.to_normalized();
+    let att_without_heading = Quaternion::from_unit_vecs(UP, accel_norm);
+
+    // Remove the final degree of freedom using heading.
+    // todo: QC You're rotating around the up or down vec, and not a relative one.
+    // let yaw_rotation = Quaternion::from_axis_angle(UP, heading); // todo: down or up?
+    let yaw_rotation = Quaternion::from_axis_angle(accel_norm, heading); // todo: down or up?
+    yaw_rotation * att_without_heading
 }
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
