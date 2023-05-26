@@ -189,21 +189,21 @@ impl PositInertial {
             println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
 
             println!("Acclen: {}", accel_data.magnitude());
-            println!(
-                "Att acc: p{} r{} y{}",
-                euler_acc.pitch, euler_acc.roll, euler_acc.yaw
-            );
+            // println!(
+            //     "Att acc: p{} r{} y{}",
+            //     euler_acc.pitch, euler_acc.roll, euler_acc.yaw
+            // );
             // println!(
             //     "Att mag: p{} r{} y{}",
             //     euler_mag.pitch, euler_mag.roll, euler_mag.yaw
             // );
             //
-            // println!(
-            //     "mag vec: x{} y{} z{}",
-            //     mag_data.to_normalized().x,
-            //     mag_data.to_normalized().y,
-            //     mag_data.to_normalized().z
-            // );
+            println!(
+                "mag vec: x{} y{} z{}",
+                mag_data.to_normalized().x,
+                mag_data.to_normalized().y,
+                mag_data.to_normalized().z
+            );
             println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
             // println!("gyro: x{} y{} z{}", gyro_data.x, gyro_data.y, gyro_data.z);
 
