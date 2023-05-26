@@ -46,7 +46,8 @@ impl Ahrs {
 
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         // let fwd_shifted = self.attitude.rotate_vec(FORWARD);
-        // todo: Store accumulated yaw?
+        // todo: Store accumulated yaw? Find a solution here to not discard the yaw calculated
+        // todo from gyros when you realign to the accel.
         let heading_from_prev = 0.; // todo: Temp
 
         let att_acc = att_from_accel(accel_data, heading_from_prev);
@@ -60,11 +61,23 @@ impl Ahrs {
         // the accelerometer's normalized vector when linear acceleration is 0.
         let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP); //Verified correct
 
+        // An alignment of 1 indicates the estimated up direction between the accelerometer
+        // and gyro match. A value of 0 means they're perpendicular.
+        let acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
+
         // Estimate linear acceleration by comparing the accelerometer's normalized vector (indicating the
         // direction it resists gravity) with that estimated from the gyro. This is a proxy for linear
         // acceleration.
-        let lin_acc_estimate =
-            (accel_data.to_normalized() - grav_axis_from_att_gyro) * (accel_data.magnitude() - G); // todo QC
+
+        // Some properties this should have:
+        // -- If the grav vecs are aligned, we should see a linear accel along it: the accel's value - G * Z.
+        // -- If the acc vec is 0, we should see a lin acc at 9.8G along the gyro's G vec
+        // -- if the vecs are misaligned, we should see a lin acc IVO the acc's vector, taking grav into account.
+        // -- If the vecs are 45 degrees out of alignment, we should see 1G of lateral acceleration.
+
+        // todo: Def wrong: Consider the case of perpendicular alignment. We have a lot of lin acc; not 0!
+        // todo: More examining and adjustment of this estimation A/R.
+        let lin_acc_estimate = (accel_data - grav_axis_from_att_gyro * G) * acc_gyro_alignment;
 
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
 
@@ -76,6 +89,8 @@ impl Ahrs {
         unsafe { i += 1 };
 
         if unsafe { i } % 1000 == 0 {
+            println!("Alignment: {}", acc_gyro_alignment);
+
             println!(
                 "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
                 angle_diff_acc_gyro,
@@ -103,12 +118,18 @@ impl Ahrs {
         // let accel_magnitude = accel_data.magnitude();
 
         let lin_acc_thresh = 0.5; // m/s^2
+        let total_accel_thresh = 0.2; // m/s^2
 
-        if lin_acc_estimate.magnitude() < lin_acc_thresh {
+        if (accel_data.magnitude() - G).abs() < total_accel_thresh {
+            // We guess no linear acc since we're getting close to 1G. Note that
+            // this will produce false positives in some cases.
+            self.attitude = att_acc;
+        } else if lin_acc_estimate.magnitude() < lin_acc_thresh {
             // If not under much acceleration, re-cage our attitude.
             // todo: Partial, not full.
             self.attitude = att_acc;
         } else {
+            self.attitude = att_gyro;
             // We are under linear acceleration; ignore the accelerometer, and use the integrated
             // gyro measurement.
             // (todo: estimate the linear component, remove that, then incorporate acc data)
@@ -134,7 +155,6 @@ impl Ahrs {
             None => (),
         }
 
-        self.attitude = att_gyro;
         self.timestamp += self.dt;
     }
 }
