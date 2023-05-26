@@ -62,6 +62,7 @@ impl Params {
         imu_data: &ImuReadings,
         mag_data: Option<Vec3>,
         attitude: Quaternion,
+        cal_acc: &crate::AccelCal,
         dt: f32,
     ) {
         // todo: This is a good place to apply IMU calibration.
@@ -77,9 +78,9 @@ impl Params {
         self.v_roll = imu_data.v_roll;
         self.v_yaw = imu_data.v_yaw;
 
-        self.a_x = imu_data.a_x;
-        self.a_y = imu_data.a_y;
-        self.a_z = imu_data.a_z;
+        self.a_x = imu_data.a_x * cal_acc.slope_x + cal_acc.intercept_x;
+        self.a_y = imu_data.a_y * cal_acc.slope_y + cal_acc.intercept_y;
+        self.a_z = imu_data.a_z * cal_acc.slope_z + cal_acc.intercept_z;
 
         self.attitude = attitude;
 

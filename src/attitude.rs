@@ -14,7 +14,7 @@ use num_traits::float::Float; // abs etc
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::{ppks::PositEarthUnits, FORWARD, RIGHT, UP};
+use crate::{ppks::PositEarthUnits, FORWARD, G, RIGHT, UP};
 
 use defmt::println;
 
@@ -31,8 +31,6 @@ pub struct Ahrs {
     timestamp: f32,
 }
 
-
-
 impl Ahrs {
     pub fn new(dt: f32) -> Self {
         Self {
@@ -47,41 +45,73 @@ impl Ahrs {
     }
 
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
-        let heading_from_prev = 0.; // todo
+        // let fwd_shifted = self.attitude.rotate_vec(FORWARD);
+        // todo: Store accumulated yaw?
+        let heading_from_prev = 0.; // todo: Temp
 
         let att_acc = att_from_accel(accel_data, heading_from_prev);
-
-        let att_acc_w_lin_removed = att_from_accel(accel_data - self.linear_acc_estimate, heading_from_prev);
 
         let att_gyro = att_from_gyro(gyro_data, self.attitude, self.dt);
 
         let diff_acc_gyro = att_acc * att_gyro.inverse();
         let angle_diff_acc_gyro = diff_acc_gyro.angle();
 
-        // todo: Is this up, or down?
-        // todo: Inv, or normal?
-        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
-        let lin_acc_estimate = att_acc - grav_axis_from_att_gyro * (accel_data.magnitude() - G); // todo QC
+        // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
+        // the accelerometer's normalized vector when linear acceleration is 0.
+        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP); //Verified correct
+
+        // Estimate linear acceleration by comparing the accelerometer's normalized vector (indicating the
+        // direction it resists gravity) with that estimated from the gyro. This is a proxy for linear
+        // acceleration.
+        let lin_acc_estimate =
+            (accel_data.to_normalized() - grav_axis_from_att_gyro) * (accel_data.magnitude() - G); // todo QC
 
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
 
+        let att_acc_w_lin_removed =
+            att_from_accel(accel_data - self.linear_acc_estimate, heading_from_prev);
+
+        static mut i: u32 = 0;
+
+        unsafe { i += 1 };
+
+        if unsafe { i } % 1000 == 0 {
+            println!(
+                "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
+                angle_diff_acc_gyro,
+                grav_axis_from_att_gyro.x,
+                grav_axis_from_att_gyro.y,
+                grav_axis_from_att_gyro.z
+            );
+
+            println!(
+                "Lin x{} y{} z{}. mag{}",
+                self.linear_acc_estimate.x,
+                self.linear_acc_estimate.y,
+                self.linear_acc_estimate.z,
+                lin_acc_estimate.magnitude()
+            );
+        }
 
         // If the magntidue of the acceleration is above this value, we are under linear acceleration,
         // and should ignore the accelerometer.
-        let acc_magnitude_thresh_upper = crate::G * 1.2;  // todo setting somewhere
-        let acc_magnitude_thresh_lower = crate::G * 0.8;  // todo setting somewhere
-        // let acc_magntude_thresh = 7.;  // todo setting somewhere
-        // println!("mag: {}", accel_data.magnitude());
+        let acc_magnitude_thresh_upper = G * 1.2; // todo setting somewhere
+        let acc_magnitude_thresh_lower = G * 0.8; // todo setting somewhere
+                                                  // let acc_magntude_thresh = 7.;  // todo setting somewhere
+                                                  // println!("mag: {}", accel_data.magnitude());
 
-        let accel_magnitude = accel_data.magnitude();
-        if accel_magnitude > acc_magnitude_thresh_upper || accel_magnitude < acc_magnitude_thresh_lower {
-            // We are under linear acceleration; ignore the accelerometer, and use the integrated
-            // gyro measurement.
-            // (todo: estimate the linear component, remove that, then incorporate acc data)
-        } else {
+        // let accel_magnitude = accel_data.magnitude();
+
+        let lin_acc_thresh = 0.5; // m/s^2
+
+        if lin_acc_estimate.magnitude() < lin_acc_thresh {
             // If not under much acceleration, re-cage our attitude.
             // todo: Partial, not full.
             self.attitude = att_acc;
+        } else {
+            // We are under linear acceleration; ignore the accelerometer, and use the integrated
+            // gyro measurement.
+            // (todo: estimate the linear component, remove that, then incorporate acc data)
         }
 
         // todo: Ways to identify linear acceleration:
@@ -96,21 +126,18 @@ impl Ahrs {
 
         // println!("att gyro: {:?}", att_gyro.x);
 
-
         match mag_data {
             Some(mag) => {
                 let incliantion = -1.09;
                 let att_mag = att_from_mag(mag, incliantion);
             }
-            None => ()
+            None => (),
         }
 
         self.attitude = att_gyro;
         self.timestamp += self.dt;
-
     }
 }
-
 
 /// Estimate attitude from accelerometer. This will fail when under
 /// linear acceleration. Apply calibration prior to this step.
@@ -141,9 +168,11 @@ pub fn att_from_mag(mag: Vec3, inclination: f32) -> Quaternion {
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.
 /// dt is in seconds.
 pub fn att_from_gyro(gyro: Vec3, att_prev: Quaternion, dt: f32) -> Quaternion {
-    let rot_x = Quaternion::from_axis_angle(RIGHT, gyro.x * dt);
-    let rot_y = Quaternion::from_axis_angle(FORWARD, gyro.y * dt);
-    let rot_z = Quaternion::from_axis_angle(UP, gyro.z * dt);
+    // We use negative vectors due to the conventions; I don't have a grasp on it, but this appears
+    // required for it to work.
+    let rot_x = Quaternion::from_axis_angle(-RIGHT, gyro.x * dt);
+    let rot_y = Quaternion::from_axis_angle(-FORWARD, gyro.y * dt);
+    let rot_z = Quaternion::from_axis_angle(-UP, gyro.z * dt);
 
     // todo: Rotation order?
     rot_x * rot_y * rot_z * att_prev
@@ -155,7 +184,7 @@ pub fn get_linear_accel(accel: Vec3, att: Quaternion) -> Vec3 {
     let accel_mag = accel.magnitude();
 
     accel_vec_earth_ref *= accel_mag;
-    accel_vec_earth_ref.z -= crate::G;
+    accel_vec_earth_ref.z -= G;
 
     accel_vec_earth_ref
 }

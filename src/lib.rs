@@ -15,10 +15,7 @@ pub mod attitude;
 pub mod params;
 pub mod ppks;
 
-pub use crate::{
-    attitude::{Ahrs},
-    params::Params,
-};
+pub use crate::{attitude::Ahrs, params::Params};
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 use lin_alg2::f32::{Mat3, Quaternion, Vec3};
@@ -70,6 +67,19 @@ pub struct AccelCal {
     pub intercept_y: f32,
     pub slope_z: f32,
     pub intercept_z: f32,
+}
+
+impl Default for AccelCal {
+    fn default() -> Self {
+        Self {
+            slope_x: 1.,
+            intercept_x: 0.,
+            slope_y: 1.,
+            intercept_y: 0.,
+            slope_z: 1.,
+            intercept_z: 0.,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
@@ -154,7 +164,7 @@ impl ImuReadings {
             a_z: interpret_accel_or_gyro(i16::from_be_bytes([buf[5], buf[6]]), accel_fullscale),
             v_pitch: interpret_accel_or_gyro(i16::from_be_bytes([buf[7], buf[8]]), gyro_fullscale),
             v_roll: interpret_accel_or_gyro(i16::from_be_bytes([buf[9], buf[10]]), gyro_fullscale),
-            v_yaw: -interpret_accel_or_gyro(i16::from_be_bytes([buf[11], buf[12]]), gyro_fullscale),
+            v_yaw: interpret_accel_or_gyro(i16::from_be_bytes([buf[11], buf[12]]), gyro_fullscale),
         }
     }
 }
@@ -164,7 +174,6 @@ pub fn get_attitude(
     ahrs: &mut Ahrs,
     imu_readings: &ImuReadings,
     mag_readings: Option<Vec3>,
-    dt: f32,
 ) -> Quaternion {
     // Gyro measurements - not really a vector.
     // In our IMU interpretation, we use direction references that make sense for our aircraft.
@@ -175,20 +184,18 @@ pub fn get_attitude(
     // Pitch nose up, roll right wing down, yaw CCW
     // LIS3 mat: X left, Y back, z up
 
-    // Important: The ICM42688 is inconsistent about left-hand-rule vs right-hand-rule
-    // re its gyro and mag readings. We must take this into account. It uses RHR for Z and X,
-    // and LHR for Y.
+    // Note; The ICM42688 uses the right hand rule for relating accelerometer and gyro readings.
 
     let accel_data = Vec3 {
         x: imu_readings.a_x,
-        y: -imu_readings.a_y, // negative due to our IMU's coord system.
+        y: imu_readings.a_y, // negative due to our IMU's coord system.
         z: imu_readings.a_z,
     };
 
     let gyro_data = Vec3 {
         x: imu_readings.v_pitch,
         y: imu_readings.v_roll,
-        z: imu_readings.v_yaw,
+        z: -imu_readings.v_yaw,
     };
     // let gyro_data = Vec3::new_zero();
 

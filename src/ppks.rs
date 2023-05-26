@@ -126,18 +126,17 @@ impl PositInertial {
         params: &Params,
         dt: f32, // seconds
     ) {
-
         // todo: Using this to experiment with new att platform
         let mut accel_data = Vec3 {
             x: params.a_x,
-            y: -params.a_y, // negative due to our IMU's coord system.
+            y: params.a_y, // negative due to our IMU's coord system.
             z: params.a_z,
         };
 
         let gyro_data = Vec3 {
             x: params.v_pitch,
             y: params.v_roll,
-            z: params.v_yaw,
+            z: -params.v_yaw,
         };
         let mag_data = Vec3 {
             x: -params.mag_y, // negative due to our mag's coord systeparams.mag_.
@@ -206,6 +205,7 @@ impl PositInertial {
                 mag_data.to_normalized().z
             );
             println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
+            // println!("gyro: x{} y{} z{}", gyro_data.x, gyro_data.y, gyro_data.z);
 
             // println!(
             //     "Acc norm: x{} y{} z{}",
