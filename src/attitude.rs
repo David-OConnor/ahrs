@@ -54,12 +54,8 @@ impl Ahrs {
         }
     }
 
+    /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
-        // let fwd_shifted = self.attitude.rotate_vec(FORWARD);
-        // todo: Store accumulated yaw? Find a solution here to not discard the yaw calculated
-        // todo from gyros when you realign to the accel.
-        let heading_from_prev = 0.; // todo: Temp
-
         // todo: A system where any 2/3 of your sources can, in agreement, update the biases
         // todo of the third.
 
@@ -68,16 +64,95 @@ impl Ahrs {
 
         // todo: Can we assume that lin acceleration is 0 over time along any given axis,
         // todo, then use this to bias your lin acc estimate?
+        let accel_norm = accel_data.to_normalized();
 
-        let att_acc = att_from_accel(accel_data, heading_from_prev);
+        let att_acc = att_from_accel(accel_norm);
+        let att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
 
-        // todo: You may need to keep the gyro "free-spinning" for longer; currently
-        // todo teh process doesn't give the gyro much authority to generate a diff grav angle
-        // todo from the acc.
-        let att_gyro = att_from_gyro(gyro_data, self.attitude, self.dt);
+        let att_acc_w_heading = find_z_rot(self.attitude, accel_norm) * att_acc;
 
-        let diff_acc_gyro = att_acc * att_gyro.inverse();
+        let diff_acc_gyro = att_acc_w_heading * att_gyro.inverse();
         let angle_diff_acc_gyro = diff_acc_gyro.angle();
+
+        let lin_acc_estimate = self.handle_linear_acc(accel_data, att_acc, att_gyro);
+
+        let att_acc_w_lin_removed = att_from_accel(accel_data - lin_acc_estimate);
+
+        // todo: Note that this overrides your above logic...
+        self.attitude = att_acc_w_lin_removed;
+        self.att_from_gyros = att_gyro;
+
+        match mag_data {
+            Some(mag) => {
+                let incliantion = -1.09;
+                let att_mag = att_from_mag(mag, incliantion);
+            }
+            None => (),
+        }
+
+        self.timestamp += self.dt;
+
+        static mut i: u32 = 0;
+        unsafe { i += 1 };
+        if unsafe { i } % 1000 == 0 {
+            // println!("Alignment: {}", acc_gyro_alignment);
+
+            let euler = self.attitude.to_euler();
+
+            let axis = self.attitude.axis();
+            let angle = self.attitude.angle();
+
+            let x_component = (axis.project_to_vec(RIGHT) * angle).magnitude();
+            let y_component = (axis.project_to_vec(FORWARD) * angle).magnitude();
+            let z_component = (axis.project_to_vec(UP) * angle).magnitude();
+
+            // A take 3 may be a vec projec of teh angle rep
+            println!(
+                "\n\nAxis rots: x{} y{} z{}",
+                x_component, y_component, z_component
+            );
+
+            println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+
+            println!("Acclen: {}", accel_data.magnitude());
+            // println!(
+
+            let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP); //Verified correct
+            println!(
+                "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
+                angle_diff_acc_gyro,
+                grav_axis_from_att_gyro.x,
+                grav_axis_from_att_gyro.y,
+                grav_axis_from_att_gyro.z
+            );
+
+            println!(
+                "mag vec: x{} y{} z{}",
+                // mag_data.to_normalized().x,
+                // mag_data.to_normalized().y,
+                // mag_data.to_normalized().z
+                mag_data.unwrap().x,
+                mag_data.unwrap().y,
+                mag_data.unwrap().z
+            );
+        }
+    }
+
+    /// Attempt to separate linear from gravitational acceleration.
+    /// Returns the estimate mof linear acceleration.
+    fn handle_linear_acc(
+        &mut self,
+        accel_data: Vec3,
+        att_acc: Quaternion,
+        att_gyro: Quaternion,
+    ) -> Vec3 {
+        // todo: Ways to identify linear acceleration:
+        // - Greater or less than 1G of acceleration, if the accel is calibrated.
+        // - Discontinuities or other anomolies when integrating accel-based attitude over time,
+        // - or, along those lines, discontinuities etc when fusing with gyro.
+
+        // Identify the angle difference in the vector between the current attitude estimate, and that
+        // from the accelerometer alone.
 
         // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
         // the accelerometer's normalized vector when linear acceleration is 0.
@@ -127,22 +202,33 @@ impl Ahrs {
 
         let lin_acc_estimate_bias_removed = lin_acc_estimate - lin_acc_bias;
 
-        let att_acc_w_lin_removed = att_from_accel(
-            accel_data - lin_acc_estimate_bias_removed,
-            heading_from_prev,
-        );
+        // If the magntidue of the acceleration is above this value, we are under linear acceleration,
+        // and should ignore the accelerometer.
+        let acc_magnitude_thresh_upper = G * 1.2; // todo setting somewhere
+        let acc_magnitude_thresh_lower = G * 0.8; // todo setting somewhere
+                                                  // let accel_magnitude = accel_data.magnitude();
+
+        let lin_acc_thresh = 0.4; // m/s^2
+        let total_accel_thresh = 0.2; // m/s^2
+
+        // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
+        if (accel_data.magnitude() - G).abs() < total_accel_thresh {
+            // We guess no linear acc since we're getting close to 1G. Note that
+            // this will produce false positives in some cases.
+            self.att_from_gyros = att_acc;
+        } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
+            // If not under much acceleration, re-cage our attitude.
+            // todo: Partial, not full.
+            self.att_from_gyros = att_acc;
+        }
 
         static mut i: u32 = 0;
         unsafe { i += 1 };
         if unsafe { i } % 1000 == 0 {
-            println!("Alignment: {}", acc_gyro_alignment);
-
+            // println!("Alignment: {}", acc_gyro_alignment);
             println!(
-                "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
-                angle_diff_acc_gyro,
-                grav_axis_from_att_gyro.x,
-                grav_axis_from_att_gyro.y,
-                grav_axis_from_att_gyro.z
+                "Lin bias: x{} y{} z{}",
+                lin_acc_bias.x, lin_acc_bias.y, lin_acc_bias.z,
             );
 
             println!(
@@ -152,79 +238,39 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude()
             );
-
-            println!(
-                "Lin bias: x{} y{} z{}",
-                lin_acc_bias.x, lin_acc_bias.y, lin_acc_bias.z,
-            );
         }
 
-        // If the magntidue of the acceleration is above this value, we are under linear acceleration,
-        // and should ignore the accelerometer.
-        let acc_magnitude_thresh_upper = G * 1.2; // todo setting somewhere
-        let acc_magnitude_thresh_lower = G * 0.8; // todo setting somewhere
-                                                  // let acc_magntude_thresh = 7.;  // todo setting somewhere
-                                                  // println!("mag: {}", accel_data.magnitude());
-
-        // let accel_magnitude = accel_data.magnitude();
-
-        let lin_acc_thresh = 0.5; // m/s^2
-        let total_accel_thresh = 0.2; // m/s^2
-
-        if (accel_data.magnitude() - G).abs() < total_accel_thresh {
-            // We guess no linear acc since we're getting close to 1G. Note that
-            // this will produce false positives in some cases.
-            self.attitude = att_acc;
-        } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
-            // If not under much acceleration, re-cage our attitude.
-            // todo: Partial, not full.
-            self.attitude = att_acc;
-        } else {
-            self.attitude = att_gyro;
-            // We are under linear acceleration; ignore the accelerometer, and use the integrated
-            // gyro measurement.
-            // (todo: estimate the linear component, remove that, then incorporate acc data)
-        }
-
-        // todo: Note that this overrides your above logic...
-        self.attitude = att_acc_w_lin_removed;
-
-        // todo: Ways to identify linear acceleration:
-        // - Greater or less than 1G of acceleration, if the accel is calibrated.
-        // - Discontinuities or other anomolies when integrating accel-based attitude over time,
-        // - or, along those lines, discontinuities etc when fusing with gyro.
-
-        // Identify the angle difference in the vector between the current attitude estimate, and that
-        // from the accelerometer alone.
-
-        // self.att_from_gyros = att_gyro;
-
-        // println!("att gyro: {:?}", att_gyro.x);
-
-        match mag_data {
-            Some(mag) => {
-                let incliantion = -1.09;
-                let att_mag = att_from_mag(mag, incliantion);
-            }
-            None => (),
-        }
-
-        self.timestamp += self.dt;
+        lin_acc_estimate_bias_removed
     }
 }
 
 /// Estimate attitude from accelerometer. This will fail when under
 /// linear acceleration. Apply calibration prior to this step.
-/// `heading` is in radians
-pub fn att_from_accel(accel: Vec3, heading: f32) -> Quaternion {
-    let accel_norm = accel.to_normalized();
-    let att_without_heading = Quaternion::from_unit_vecs(UP, accel_norm);
+/// Uses the previous attitude to rotate along the remaining degree of freedom (heading)
+pub fn att_from_accel(accel_norm: Vec3) -> Quaternion {
+    Quaternion::from_unit_vecs(UP, accel_norm)
+}
 
-    // Remove the final degree of freedom using heading.
-    // todo: QC You're rotating around the up or down vec, and not a relative one.
-    // let yaw_rotation = Quaternion::from_axis_angle(UP, heading); // todo: down or up?
-    let yaw_rotation = Quaternion::from_axis_angle(accel_norm, heading); // todo: down or up?
-    yaw_rotation * att_without_heading
+/// Find the rotation around the Z axis associated with an attitude. We use this to apply
+/// gyro and mag heading to the remaining degree of freedom on attitude from acceleration.
+fn find_z_rot(att: Quaternion, accel_norm: Vec3) -> Quaternion {
+    let axis = att.axis();
+    let angle = att.angle();
+
+    let z_component_prev = (axis.project_to_vec(UP) * angle).magnitude();
+
+    // Remove the final degree of freedom using heading. Rotate around UP in the earth frame.
+    let yaw_rotation = Quaternion::from_axis_angle(accel_norm, z_component_prev);
+    // let yaw_rotation = Quaternion::from_axis_angle(UP, z_component_prev);
+
+    static mut i: u32 = 0;
+    unsafe { i += 1 };
+    if unsafe { i } % 1000 == 0 {
+        println!("\nYaw rot: {:?}\n", z_component_prev);
+        println!("\nAtt p Ax{} {} {} An{}\n", axis.x, axis.y, axis.z, angle);
+    }
+
+    yaw_rotation
 }
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
@@ -249,7 +295,7 @@ pub fn att_from_gyro(gyro: Vec3, att_prev: Quaternion, dt: f32) -> Quaternion {
     let rot_z = Quaternion::from_axis_angle(-UP, gyro.z * dt);
 
     // todo: Rotation order?
-    rot_x * rot_y * rot_z * att_prev
+    rot_z * rot_x * rot_y * att_prev
 }
 
 pub fn get_linear_accel(accel: Vec3, att: Quaternion) -> Vec3 {
@@ -261,4 +307,23 @@ pub fn get_linear_accel(accel: Vec3, att: Quaternion) -> Vec3 {
     accel_vec_earth_ref.z -= G;
 
     accel_vec_earth_ref
+}
+
+/// Find the vector associated with linear acceleration induced by a position
+/// offset in the accelerometer, leading rotations to induce accel.
+/// We may subtract this from total accelerometer reading.
+/// `posit_offset` is in meters. Rotation is in rad/s
+pub fn find_accel_offset(posit_offset: Vec3, gyro_readings: Vec3) -> Vec3 {
+    let rotation_x = Quaternion::from_axis_angle(RIGHT, gyro_readings.x);
+    let rotation_y = Quaternion::from_axis_angle(FORWARD, gyro_readings.y);
+    let rotation_z = Quaternion::from_axis_angle(UP, gyro_readings.z);
+
+    // Order?
+    let rotation = rotation_z * rotation_x * rotation_y;
+
+    let rot_axis = rotation.axis();
+    let rot_angle = rotation.angle();
+
+    // todo: QC these
+    posit_offset.cross(rot_axis * rot_angle)
 }

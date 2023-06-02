@@ -67,6 +67,8 @@ impl Params {
     ) {
         // todo: This is a good place to apply IMU calibration.
 
+        // todo: Is accel cal required given your bias algo?
+
         // Calculate angular acceleration. Do this before updating velocities, since we use
         // the prev ones here.
         self.a_pitch = (imu_data.v_pitch - self.v_pitch) / dt;
