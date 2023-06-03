@@ -23,7 +23,7 @@ pub struct Ahrs {
     att_from_gyros: Quaternion,
     att_from_acc: Quaternion,
     // att_from_mag: Quaternion,
-    linear_acc_estimate: Vec3,
+    pub linear_acc_estimate: Vec3,
     // linear_acc_confidence: f32, // todo?
     /// linear acceleration, per axis, integrated over time. We use this to
     /// remove biases, under the assumption that this should average out to 0, along
