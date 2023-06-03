@@ -66,22 +66,45 @@ impl Ahrs {
         let att_acc = att_from_accel(accel_norm);
         let mut att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
 
-        // To perform this update, we assume the previous attitude has a valid heading.
-        // let att_acc_w_heading = find_z_rot(self.att_from_gyros, accel_norm) * att_acc;
-        let att_acc_w_heading = find_z_rot(self.attitude, accel_norm) * att_acc;
+        // Heading from the previous attitude.
+        let heading_prev = heading_from_att(self.attitude);
 
-        let (update_gyro_from_acc, lin_acc_estimate) = self.handle_linear_acc(accel_data, att_acc_w_heading, att_gyro);
+        let mag_heading_weight = 0.1; // todo: FUnction of dt
+        let gyro_heading_weight = 1. - mag_heading_weight;
 
-        let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
+        let mut heading_fused = heading_prev;
 
         // todo: Separate function to fuse mag.
-                match mag_data {
+        match mag_data {
             Some(mag) => {
-                let incliantion = -1.09;
-                let att_mag = att_from_mag(mag, incliantion);
+                let mag_norm = mag.to_normalized();
+                // let incliantion = -1.09;
+                // let att_mag = att_from_mag(mag_norm, incliantion);
+                let heading_mag = heading_from_mag(mag);
+
+                // Fuse heading from gyro with heading from mag.
+                // heading_fused = (heading_prev * gyro_heading_weight + heading_mag * mag_heading_weight) / 2.;
+
+                // todo: For now, we are using mag only for the heading.
+
+                if unsafe { i } % 1000 == 0 {
+                    println!("mag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
+
+                    println!("Heading mag: {}", heading_mag);
+                }
             }
             None => (),
         }
+
+        // To perform this update, we assume the previous attitude has a valid heading.
+        // let att_acc_w_heading = find_z_rot(self.att_from_gyros, accel_norm) * att_acc;
+        let z_rotation = find_z_rot(heading_fused, accel_norm);
+        let att_acc_w_heading = z_rotation * att_acc;
+
+        let (update_gyro_from_acc, lin_acc_estimate) =
+            self.handle_linear_acc(accel_data, att_acc_w_heading, att_gyro);
+
+        let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
 
         // How much, as a portion of 1., to update the gyro attitude from the accel.
         // 1.0 means replace it.
@@ -104,7 +127,8 @@ impl Ahrs {
                 x: (att_acc_w_heading.x * update_port_acc + att_gyro.x * update_port_gyro),
                 y: (att_acc_w_heading.y * update_port_acc + att_gyro.y * update_port_gyro),
                 z: (att_acc_w_heading.z * update_port_acc + att_gyro.z * update_port_gyro),
-            }.to_normalized();
+            }
+            .to_normalized();
 
             att_fused = att_acc_w_heading; // todo: T!
         }
@@ -142,16 +166,7 @@ impl Ahrs {
 
             println!("Acclen: {}", accel_data.magnitude());
 
-
-            println!(
-                "mag vec: x{} y{} z{}",
-                // mag_data.to_normalized().x,
-                // mag_data.to_normalized().y,
-                // mag_data.to_normalized().z
-                mag_data.unwrap().x,
-                mag_data.unwrap().y,
-                mag_data.unwrap().z
-            );
+            println!("\nHeading fused: {:?}\n", heading_fused);
         }
     }
 
@@ -284,39 +299,38 @@ pub fn att_from_accel(accel_norm: Vec3) -> Quaternion {
     Quaternion::from_unit_vecs(UP, accel_norm)
 }
 
-/// Find the rotation around the Z axis associated with an attitude. We use this to apply
-/// gyro and mag heading to the remaining degree of freedom on attitude from acceleration.
-fn find_z_rot(att: Quaternion, accel_norm: Vec3) -> Quaternion {
+/// Calculate heading, from an attitude;
+fn heading_from_att(att: Quaternion) -> f32 {
     let axis = att.axis();
     let angle = att.angle();
 
     let sign_z = axis.z.signum();
-    let z_component_prev = (axis.project_to_vec(UP) * angle).magnitude() * sign_z;
+    (axis.project_to_vec(UP) * angle).magnitude() * sign_z
+}
 
+/// Find the rotation around the Z axis associated with an attitude. We use this to apply
+/// gyro and mag heading to the remaining degree of freedom on attitude from acceleration.
+fn find_z_rot(heading: f32, accel_norm: Vec3) -> Quaternion {
     // Remove the final degree of freedom using heading. Rotate around UP in the earth frame.
-    let yaw_rotation = Quaternion::from_axis_angle(accel_norm, z_component_prev);
-    // let yaw_rotation = Quaternion::from_axis_angle(UP, z_component_prev);
-
-    static mut i: u32 = 0;
-    unsafe { i += 1 };
-    if unsafe { i } % 1000 == 0 {
-        println!("\nYaw rot: {:?}\n", z_component_prev);
-        println!("\nAtt p Ax{} {} {} An{}\n", axis.x, axis.y, axis.z, angle);
-    }
-
-    yaw_rotation
+    Quaternion::from_axis_angle(accel_norm, heading)
+    // Quaternion::from_axis_angle(UP, heading)
 }
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
 /// interference, and is noisy in general. Apply calibration prior to this step.
 /// Inclination is in radians.
 // pub fn att_from_mag(mag: Vec3, posit: &PositEarthUnits) -> Quaternion {
-pub fn att_from_mag(mag: Vec3, inclination: f32) -> Quaternion {
+pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
     let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
 
     let mag_field_vec = incl_rot.rotate_vec(FORWARD);
 
-    Quaternion::from_unit_vecs(mag_field_vec, mag.to_normalized())
+    Quaternion::from_unit_vecs(mag_field_vec, mag_norm)
+}
+
+/// Calculate heading, in radians, from the magnetometer's X and Y axes.
+pub fn heading_from_mag(mag: Vec3) -> f32 {
+    -(mag.y.atan2(mag.x))
 }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.

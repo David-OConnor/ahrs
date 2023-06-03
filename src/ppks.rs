@@ -164,13 +164,8 @@ impl PositInertial {
             elevation_msl: 0.,
         };
 
-        let inclination = -1.09;
-
-        let att_accel = crate::attitude::att_from_accel(accel_data);
-
-        let att_mag = crate::attitude::att_from_mag(mag_data, inclination);
-
-        let accel_lin = crate::attitude::get_linear_accel(accel_data, att_accel);
+        // let accel_lin = crate::attitude::get_linear_accel(accel_data, att_accel);
+        let accel_lin = params.accel_linear;
 
         self.x += self.v_x * dt;
         self.y += self.v_y * dt;
@@ -184,46 +179,6 @@ impl PositInertial {
         unsafe { i += 1 };
 
         if unsafe { i } % 2000 == 0 {
-            let euler = params.attitude.to_euler();
-            let euler_acc = att_accel.to_euler();
-            let euler_mag = att_mag.to_euler();
-
-            // println!("\n\nAtt: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
-            //
-            // println!("Acclen: {}", accel_data.magnitude());
-            // // println!(
-            //     "Att acc: p{} r{} y{}",
-            //     euler_acc.pitch, euler_acc.roll, euler_acc.yaw
-            // );
-            // println!(
-            //     "Att mag: p{} r{} y{}",
-            //     euler_mag.pitch, euler_mag.roll, euler_mag.yaw
-            // );
-            //
-            // println!(
-            //     "mag vec: x{} y{} z{}",
-            //     // mag_data.to_normalized().x,
-            //     // mag_data.to_normalized().y,
-            //     // mag_data.to_normalized().z
-            //                     mag_data.x,
-            //     mag_data.y,
-            //     mag_data.z
-            // );
-
-            println!("Estimated hdg: {}", mag_data.y.atan2(mag_data.x));
-
-            // println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
-            // println!("gyro: x{} y{} z{}", gyro_data.x, gyro_data.y, gyro_data.z);
-
-            // println!(
-            //     "Acc norm: x{} y{} z{}",
-            //     accel_norm.x, accel_norm.y, accel_norm.z
-            // );
-            // println!(
-            //     "Acc E: x{} y{} z{}",
-            //     accel_data_earth_ref.x, accel_data_earth_ref.y, accel_data_earth_ref.z
-            // );
-
             println!(
                 "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
                 self.x, self.y, self.z, self.v_x, self.v_y, self.v_z

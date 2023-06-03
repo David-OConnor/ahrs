@@ -30,6 +30,7 @@ pub struct Params {
     /// Quaternion of the attitude.
     pub attitude: Quaternion,
     // todo: AHRS quaternion field, or leave that as part of the `AHRS` struct?
+    pub accel_linear: Vec3,
 
     // Velocity
     pub v_x: f32,
@@ -62,6 +63,7 @@ impl Params {
         imu_data: &ImuReadings,
         mag_data: Option<Vec3>,
         attitude: Quaternion,
+        accel_linear: Vec3,
         acc_cal: &crate::AccelCal,
         dt: f32,
     ) {
@@ -85,6 +87,7 @@ impl Params {
         self.a_z = imu_data.a_z * acc_cal.slope_z + acc_cal.intercept_z;
 
         self.attitude = attitude;
+        self.accel_linear = accel_linear;
 
         // let euler = attitude.to_euler();
         // self.s_pitch = euler.pitch;
