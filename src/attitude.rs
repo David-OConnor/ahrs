@@ -37,6 +37,7 @@ pub struct AhrsConfig {
     /// accelerometer. Keep this in mind re expectations of gyro drift rate.
     pub update_from_acc_amt: f32,
     pub update_port_mag_heading: f32,
+    pub calibration: crate::ImuCalibration,
 }
 
 impl Default for AhrsConfig {
@@ -45,8 +46,9 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
-            update_from_acc_amt: 0.5,
+            update_from_acc_amt: 0.3,
             update_port_mag_heading: 0.1,
+            calibration: Default::default(),
         }
     }
 }
@@ -71,7 +73,7 @@ pub struct Ahrs {
     recent_dh_mag__dh_gyro: Option<f32>,
     /// Timestamp, in seconds.
     timestamp: f32,
-    config: AhrsConfig,
+    pub config: AhrsConfig,
     /// Time between updates, in seconds.
     dt: f32,
 }
@@ -158,7 +160,6 @@ impl Ahrs {
 
                     println!("Heading mag: {}", heading_mag);
                     println!("Heading gyro: {}", heading_gyro);
-                    println!("test");
                 }
             }
             None => {
@@ -173,6 +174,7 @@ impl Ahrs {
             self.handle_linear_acc(accel_data, att_acc_w_heading, att_gyro);
 
         let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
+        let att_acc_w_lin_removed_and_heading = z_rotation * att_acc_w_lin_removed;
 
         let mut att_fused = att_gyro;
 
@@ -193,11 +195,11 @@ impl Ahrs {
 
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
             // much linear acceleration.
-            let rot_gyro_to_acc = att_acc_w_heading * att_gyro.inverse();
+            // let rot_gyro_to_acc = att_acc_w_heading * att_gyro.inverse();
+            let rot_gyro_to_acc = att_acc_w_lin_removed_and_heading * att_gyro.inverse();
 
-            let rot_to_apply_to_gyro =
-                Quaternion::new_identity().slerp(rot_gyro_to_acc,  self.config.update_from_acc_amt * self.dt);
-
+            let rot_to_apply_to_gyro = Quaternion::new_identity()
+                .slerp(rot_gyro_to_acc, self.config.update_from_acc_amt * self.dt);
 
             if unsafe { i } % 1000 == 0 {
                 let (x_component, y_component, z_component) = att_to_axes(rot_gyro_to_acc);
@@ -240,7 +242,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -280,6 +282,7 @@ impl Ahrs {
             );
 
             println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+            println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
 
             println!("Acclen: {}", accel_data.magnitude());
 
@@ -341,9 +344,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
         self.linear_acc_cum += lin_acc_estimate * self.dt;
 
         // Important: This bias assumes acceleration evens out to 0 over time; this may or may not
@@ -366,7 +369,7 @@ impl Ahrs {
         // and should ignore the accelerometer.
         let acc_magnitude_thresh_upper = G * 1.2; // todo setting somewhere
         let acc_magnitude_thresh_lower = G * 0.8; // todo setting somewhere
-        // let accel_magnitude = accel_data.magnitude();
+                                                  // let accel_magnitude = accel_data.magnitude();
 
         let lin_acc_thresh = 0.4; // m/s^2
         let total_accel_thresh = 0.2; // m/s^2
@@ -452,7 +455,7 @@ pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
 
 /// Calculate heading, in radians, from the magnetometer's X and Y axes.
 pub fn heading_from_mag(mag: Vec3) -> f32 {
-    (mag.y.atan2(mag.x))
+    mag.y.atan2(mag.x)
 }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.

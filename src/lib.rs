@@ -60,25 +60,35 @@ pub const RIGHT: Vec3 = Vec3 {
 
 /// Apply this linear map to raw IMU readings to get calibrated ones, that should always
 /// return 1G of acceleration if no linear acceleration is applied.
-pub struct AccelCal {
-    pub slope_x: f32,
-    pub intercept_x: f32,
-    pub slope_y: f32,
-    pub intercept_y: f32,
-    pub slope_z: f32,
-    pub intercept_z: f32,
+pub struct ImuCalibration {
+    pub acc_slope_x: f32,
+    pub acc_intercept_x: f32,
+    pub acc_slope_y: f32,
+    pub acc_intercept_y: f32,
+    pub acc_slope_z: f32,
+    pub acc_intercept_z: f32,
 }
 
-impl Default for AccelCal {
+impl Default for ImuCalibration {
     fn default() -> Self {
         Self {
-            slope_x: 1.,
-            intercept_x: 0.,
-            slope_y: 1.,
-            intercept_y: 0.,
-            slope_z: 1.,
-            intercept_z: 0.,
+            acc_slope_x: 1.,
+            acc_intercept_x: 0.,
+            acc_slope_y: 1.,
+            acc_intercept_y: 0.,
+            acc_slope_z: 1.,
+            acc_intercept_z: 0.,
         }
+    }
+}
+
+impl ImuCalibration {
+    /// Run this when the device is stationary on a flat surface, with the Z axis up,
+    /// to initiate acceleratometer calibration. Updates intercepts only. Readings are in m/s.
+    pub fn calibrate_accel(&mut self, acc_data: Vec3) {
+        self.acc_intercept_x = -acc_data.x;
+        self.acc_intercept_y = -acc_data.y;
+        self.acc_intercept_z = G - acc_data.z;
     }
 }
 
@@ -135,7 +145,7 @@ pub struct Fix {
 
 /// Represents sensor readings from a 6-axis accelerometer + gyro.
 /// Accelerometer readings are in m/2^2. Gyroscope readings are in radians/s.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ImuReadings {
     /// Positive X: Accel towards right wing
     pub a_x: f32,
@@ -170,6 +180,7 @@ impl ImuReadings {
 }
 
 /// Update the attitude from the AHRS.
+/// Make sure calibration has been applied prior to this step.
 pub fn get_attitude(
     ahrs: &mut Ahrs,
     imu_readings: &ImuReadings,
@@ -197,29 +208,6 @@ pub fn get_attitude(
         y: imu_readings.v_roll,
         z: imu_readings.v_yaw,
     };
-    // let gyro_data = Vec3::new_zero();
-
-    // Apply calibration
-    // todo: Come back to this.
-    // gyro_data = madgwick::apply_cal_inertial(
-    //     gyro_data,
-    //     ahrs.calibration.gyro_misalignment.clone(),
-    //     ahrs.calibration.gyro_sensitivity,
-    //     ahrs.calibration.gyro_offset,
-    // );
-    // accel_data = madgwick::apply_cal_inertial(
-    //     accel_data,
-    //     ahrs.calibration.accel_misalignment.clone(),
-    //     ahrs.calibration.accel_sensitivity,
-    //     ahrs.calibration.accel_offset,
-    // );
-
-    // let magnetometer = madgwick::apply_cal_magnetic(magnetometer, softIronMatrix, hardIronOffset);
-
-    // todo: Consider putting this offset bit back later
-    // Update gyroscope offset correction algorithm
-    // let gyro_data_with_offset = ahrs.offset.update(gyro_data);
-    // let gyro_data_with_offset = gyro_data;
 
     match mag_readings {
         Some(m) => {
@@ -242,76 +230,4 @@ pub fn get_attitude(
 /// Output: m/s^2, or Output: rad/s.
 pub fn interpret_accel_or_gyro(val: i16, fullscale: f32) -> f32 {
     (val as f32 / i16::MAX as f32) * fullscale
-}
-
-// This calibration functionality is from [AHRS](https://github.com/xioTechnologies/Fusion)
-
-pub struct ImuCalibration {
-    pub gyro_misalignment: Mat3,
-    pub gyro_sensitivity: Vec3,
-    pub gyro_offset: Vec3,
-    pub accel_misalignment: Mat3,
-    pub accel_sensitivity: Vec3,
-    pub accel_offset: Vec3,
-    pub soft_iron_matrix: Mat3,
-    pub hard_iron_offset: Vec3,
-}
-
-impl Default for ImuCalibration {
-    #[rustfmt::skip]
-    fn default() -> Self {
-        Self {
-            gyro_misalignment: Mat3 {
-                data: [
-                    1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0
-                ],
-            },
-            gyro_sensitivity: Vec3::new(1.0, 1.0, 1.0),
-            gyro_offset: Vec3::new(0.0, 0.0, 0.0),
-            accel_misalignment: Mat3 {
-                data: [
-                    1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0
-                ],
-            },
-            accel_sensitivity: Vec3::new(1.0, 1.0, 1.0),
-            accel_offset: Vec3::new(0.0, 0.0, 0.0),
-            soft_iron_matrix: Mat3 {
-                data: [
-                    1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0
-                ],
-            },
-            hard_iron_offset: Vec3::new(0.0, 0.0, 0.0),
-        }
-    }
-}
-
-/// Gyroscope and accelerometer calibration model. Returns calibrated measurement.
-pub fn apply_cal_inertial(
-    uncalibrated: Vec3,
-    misalignment: Mat3,
-    sensitivity: Vec3,
-    offset: Vec3,
-) -> Vec3 {
-    misalignment * (uncalibrated - offset).hadamard_product(sensitivity)
-}
-
-/// Magnetometer calibration model. Returns calibrated measurement.
-pub fn apply_cal_magnetic(
-    uncalibrated: Vec3,
-    soft_iron_matrix: Mat3,
-    hard_iron_offset: Vec3,
-) -> Vec3 {
-    soft_iron_matrix * uncalibrated - hard_iron_offset
-}
-
-/// Calibrate the IMU, by taking a series of series while on a level surface.
-pub fn calibrate() -> ImuCalibration {
-    // todo: average? lowpass?
-    Default::default()
 }

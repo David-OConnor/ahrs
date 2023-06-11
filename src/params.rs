@@ -5,7 +5,8 @@
 
 // use crate::{ppks::PositionFused};
 
-use crate::ImuReadings;
+use crate::{Ahrs, ImuReadings};
+
 use lin_alg2::f32::{Quaternion, Vec3};
 
 /// Aircraft flight parameters, at a given instant. Pitch and roll rates are in the aircraft's
@@ -62,9 +63,10 @@ impl Params {
         &mut self,
         imu_data: &ImuReadings,
         mag_data: Option<Vec3>,
-        attitude: Quaternion,
-        accel_linear: Vec3,
-        acc_cal: &crate::AccelCal,
+        // attitude: Quaternion,
+        // accel_linear: Vec3,
+        // acc_cal: &crate::ImuCalibration,
+        ahrs: &mut Ahrs,
         dt: f32,
     ) {
         // todo: This is a good place to apply IMU calibration.
@@ -82,12 +84,22 @@ impl Params {
         self.v_roll = imu_data.v_roll;
         self.v_yaw = imu_data.v_yaw;
 
-        self.a_x = imu_data.a_x * acc_cal.slope_x + acc_cal.intercept_x;
-        self.a_y = imu_data.a_y * acc_cal.slope_y + acc_cal.intercept_y;
-        self.a_z = imu_data.a_z * acc_cal.slope_z + acc_cal.intercept_z;
+        let cal = &ahrs.config.calibration;
 
-        self.attitude = attitude;
-        self.accel_linear = accel_linear;
+        // Update in-place to since we pass this to the attitude-finder.
+        let mut imu_data2 = (*imu_data).clone();
+
+        imu_data2.a_x = imu_data.a_x * cal.acc_slope_x + cal.acc_intercept_x;
+        imu_data2.a_y = imu_data.a_y * cal.acc_slope_y + cal.acc_intercept_y;
+        imu_data2.a_z = imu_data.a_z * cal.acc_slope_z + cal.acc_intercept_z;
+
+        self.a_x = imu_data2.a_x;
+        self.a_y = imu_data2.a_y;
+        self.a_z = imu_data2.a_z;
+
+        self.attitude = crate::get_attitude(ahrs, &imu_data2, mag_data);
+
+        self.accel_linear = ahrs.linear_acc_estimate;
 
         // let euler = attitude.to_euler();
         // self.s_pitch = euler.pitch;
