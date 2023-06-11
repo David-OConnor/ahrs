@@ -195,7 +195,7 @@ pub fn get_attitude(
     let gyro_data = Vec3 {
         x: imu_readings.v_pitch,
         y: imu_readings.v_roll,
-        z: -imu_readings.v_yaw,
+        z: imu_readings.v_yaw,
     };
     // let gyro_data = Vec3::new_zero();
 
