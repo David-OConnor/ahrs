@@ -37,6 +37,16 @@ pub struct AhrsConfig {
     /// accelerometer. Keep this in mind re expectations of gyro drift rate.
     pub update_from_acc_amt: f32,
     pub update_port_mag_heading: f32,
+    // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
+    // /// G x these values (low, high).
+    // /// todo: Alternative: Adjust adjustment-towards-acc weight value based on this, vice
+    // /// todo updating or not.
+    // pub acc_mag_threshold_no_lin: (f32, f32),
+    /// If total acclerometer reading is within this value of G, update gyro from acc.
+    pub total_accel_thresh: f32, // m/s^2
+    /// If estimated linear acceleration magnitude is greater than this, don't update gyro
+    /// from acc.
+    pub lin_acc_thresh: f32,     // m/s^2
     pub calibration: crate::ImuCalibration,
 }
 
@@ -48,6 +58,9 @@ impl Default for AhrsConfig {
             mag_gyro_diff_thresh: 0.01,
             update_from_acc_amt: 0.3,
             update_port_mag_heading: 0.1,
+            // acc_mag_threshold_no_lin: (0.8, 1.2),
+            total_accel_thresh: 0.2, // m/s^2
+            lin_acc_thresh: 0.4,     // m/s^2
             calibration: Default::default(),
         }
     }
@@ -173,8 +186,11 @@ impl Ahrs {
         let (update_gyro_from_acc, lin_acc_estimate) =
             self.handle_linear_acc(accel_data, att_acc_w_heading, att_gyro);
 
-        let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
-        let att_acc_w_lin_removed_and_heading = z_rotation * att_acc_w_lin_removed;
+        // let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
+        // let att_acc_w_lin_removed_and_heading = z_rotation * att_acc_w_lin_removed;
+
+        // todo: Temp skipping the linear removal.
+        let att_acc_w_lin_removed_and_heading = att_acc_w_heading;
 
         let mut att_fused = att_gyro;
 
@@ -242,7 +258,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -296,7 +312,11 @@ impl Ahrs {
     }
 
     /// Attempt to separate linear from gravitational acceleration.
-    /// Returns the estimate mof linear acceleration.
+    /// Returns the estimate mof linear acceleration. This is useful for
+    /// #1: Determining how much faith (and wight) to put into the accelerometer reading for
+    /// attitude determination.
+    /// #2: Providing an acc solution that's closer to the true one for this fusing.
+    /// #3: Removing linear acceleration when computing position from dead-reckoning
     fn handle_linear_acc(
         &mut self,
         accel_data: Vec3,
@@ -313,11 +333,11 @@ impl Ahrs {
 
         // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
         // the accelerometer's normalized vector when linear acceleration is 0.
-        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP); //Verified correct
+        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP); // Verified correct
 
         // An alignment of 1 indicates the estimated up direction between the accelerometer
         // and gyro match. A value of 0 means they're perpendicular.
-        let acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
+        let _acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
 
         // Compute the difference, as a quaternion, between the attitude calulated from the accelerometer,
         // and the attitude calculated from the gyroscope. A notable difference implies linear acceleration.
@@ -344,9 +364,11 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
+        // todo: Be careful about floating point errors over time.
+        // todo: Toss extreme values?
+        // todo: Lowpass?
+
+        // Bias code below; for now, unused.
         self.linear_acc_cum += lin_acc_estimate * self.dt;
 
         // Important: This bias assumes acceleration evens out to 0 over time; this may or may not
@@ -367,30 +389,25 @@ impl Ahrs {
 
         // If the magntidue of the acceleration is above this value, we are under linear acceleration,
         // and should ignore the accelerometer.
-        let acc_magnitude_thresh_upper = G * 1.2; // todo setting somewhere
-        let acc_magnitude_thresh_lower = G * 0.8; // todo setting somewhere
-                                                  // let accel_magnitude = accel_data.magnitude();
-
-        let lin_acc_thresh = 0.4; // m/s^2
-        let total_accel_thresh = 0.2; // m/s^2
+        // let acc_magnitude_thresh_lower = G * self.config.acc_mag_threshold_no_lin.0;
+        // let acc_magnitude_thresh_upper = G * self.config.acc_mag_threshold_no_lin.1;
 
         let mut update_gyro_from_acc = false;
-
         // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
-        if (accel_data.magnitude() - G).abs() < total_accel_thresh {
+        if (accel_data.magnitude() - G).abs() < self.config.total_accel_thresh {
             // We guess no linear acc since we're getting close to 1G. Note that
             // this will produce false positives in some cases.
             update_gyro_from_acc = true;
-        } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
+            // } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
+        } else if lin_acc_estimate.magnitude() < self.config.lin_acc_thresh {
             // If not under much acceleration, re-cage our attitude.
-            // todo: Partial, not full.
             update_gyro_from_acc = true;
         }
 
         static mut i: u32 = 0;
         unsafe { i += 1 };
         if unsafe { i } % 1000 == 0 {
-            // println!("Alignment: {}", acc_gyro_alignment);
+            println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
                 lin_acc_bias.x, lin_acc_bias.y, lin_acc_bias.z,
@@ -398,13 +415,17 @@ impl Ahrs {
 
             println!(
                 "Lin x{} y{} z{}. mag{}",
-                lin_acc_estimate_bias_removed.x,
-                lin_acc_estimate_bias_removed.y,
-                lin_acc_estimate_bias_removed.z,
-                lin_acc_estimate_bias_removed.magnitude()
+                // lin_acc_estimate_bias_removed.x,
+                // lin_acc_estimate_bias_removed.y,
+                // lin_acc_estimate_bias_removed.z,
+                // lin_acc_estimate_bias_removed.magnitude()
+                lin_acc_estimate.x,
+                lin_acc_estimate.y,
+                lin_acc_estimate.z,
+                lin_acc_estimate.magnitude()
             );
 
-            //     println!(
+            // println!(
             //     "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
             //     angle_diff_acc_gyro,
             //     grav_axis_from_att_gyro.x,
@@ -413,7 +434,15 @@ impl Ahrs {
             // );
         }
 
-        (update_gyro_from_acc, lin_acc_estimate_bias_removed)
+        if unsafe { i } % 100 == 0 {
+            if !update_gyro_from_acc {
+                println!("Under lin acc");
+            }
+        }
+
+        // todo: Temporarily not removing bias.
+        // (update_gyro_from_acc, lin_acc_estimate_bias_removed)
+        (update_gyro_from_acc, lin_acc_estimate)
     }
 }
 
