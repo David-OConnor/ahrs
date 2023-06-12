@@ -46,7 +46,7 @@ pub struct AhrsConfig {
     pub total_accel_thresh: f32, // m/s^2
     /// If estimated linear acceleration magnitude is greater than this, don't update gyro
     /// from acc.
-    pub lin_acc_thresh: f32,     // m/s^2
+    pub lin_acc_thresh: f32, // m/s^2
     pub calibration: crate::ImuCalibration,
 }
 
@@ -186,11 +186,10 @@ impl Ahrs {
         let (update_gyro_from_acc, lin_acc_estimate) =
             self.handle_linear_acc(accel_data, att_acc_w_heading, att_gyro);
 
-        // let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
-        // let att_acc_w_lin_removed_and_heading = z_rotation * att_acc_w_lin_removed;
+        let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
+        let att_acc_w_lin_removed_and_heading = z_rotation * att_acc_w_lin_removed;
 
-        // todo: Temp skipping the linear removal.
-        let att_acc_w_lin_removed_and_heading = att_acc_w_heading;
+        // let att_acc_w_lin_removed_and_heading = att_acc_w_heading;
 
         let mut att_fused = att_gyro;
 
@@ -258,7 +257,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -337,7 +336,7 @@ impl Ahrs {
 
         // An alignment of 1 indicates the estimated up direction between the accelerometer
         // and gyro match. A value of 0 means they're perpendicular.
-        let _acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
+        // let _acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
 
         // Compute the difference, as a quaternion, between the attitude calulated from the accelerometer,
         // and the attitude calculated from the gyroscope. A notable difference implies linear acceleration.
@@ -356,6 +355,12 @@ impl Ahrs {
         // -- If the vecs are 45 degrees out of alignment of equal mag, we should see 1G of lateral acceleration.
         // if they are more than 45 degrees out of alignment, there is >1G of lateral acc.
 
+        let accel_mag = accel_data.magnitude();
+
+        // For this, we postulate that the gyro's attitude is correct, and therefore the force
+        // for gravity is that axis's *up* vector, multiplied by G. The difference between the accelerometer
+        // readings and this, therefore is linear acceleration.
+
         // acc = lin + grav
         // lin = acc - (grav_axis_gyro * G)
         // For the purpose of this calculation, we are assuming the real gravitation axis is
@@ -364,9 +369,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
 
         // Bias code below; for now, unused.
         self.linear_acc_cum += lin_acc_estimate * self.dt;
@@ -394,7 +399,7 @@ impl Ahrs {
 
         let mut update_gyro_from_acc = false;
         // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
-        if (accel_data.magnitude() - G).abs() < self.config.total_accel_thresh {
+        if (accel_mag - G).abs() < self.config.total_accel_thresh {
             // We guess no linear acc since we're getting close to 1G. Note that
             // this will produce false positives in some cases.
             update_gyro_from_acc = true;
@@ -407,7 +412,7 @@ impl Ahrs {
         static mut i: u32 = 0;
         unsafe { i += 1 };
         if unsafe { i } % 1000 == 0 {
-            println!("Ag: {}", _acc_gyro_alignment);
+            // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
                 lin_acc_bias.x, lin_acc_bias.y, lin_acc_bias.z,
@@ -415,14 +420,13 @@ impl Ahrs {
 
             println!(
                 "Lin x{} y{} z{}. mag{}",
-                // lin_acc_estimate_bias_removed.x,
-                // lin_acc_estimate_bias_removed.y,
-                // lin_acc_estimate_bias_removed.z,
-                // lin_acc_estimate_bias_removed.magnitude()
-                lin_acc_estimate.x,
-                lin_acc_estimate.y,
-                lin_acc_estimate.z,
-                lin_acc_estimate.magnitude()
+                lin_acc_estimate_bias_removed.x,
+                lin_acc_estimate_bias_removed.y,
+                lin_acc_estimate_bias_removed.z,
+                lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
+                                                          // lin_acc_estimate.y,
+                                                          // lin_acc_estimate.z,
+                                                          // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -441,8 +445,8 @@ impl Ahrs {
         }
 
         // todo: Temporarily not removing bias.
-        // (update_gyro_from_acc, lin_acc_estimate_bias_removed)
-        (update_gyro_from_acc, lin_acc_estimate)
+        (update_gyro_from_acc, lin_acc_estimate_bias_removed)
+        // (update_gyro_from_acc, lin_acc_estimate)
     }
 }
 
