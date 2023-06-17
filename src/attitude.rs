@@ -188,9 +188,9 @@ impl Ahrs {
 
                 self.heading_mag = Some(heading_mag);
 
-                // if unsafe { i } % 1000 == 0 {
-                if false {
-                    println!("mag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
+                if unsafe { i } % 1000 == 0 {
+                // if false {
+                    println!("\n\nmag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
 
                     println!("Heading mag: {}", heading_mag);
                     println!("Heading gyro: {}", heading_gyro);
@@ -304,27 +304,27 @@ impl Ahrs {
             let (x_component_gyro, y_component_gyro, z_component_gyro) =
                 att_to_axes(self.att_from_gyros);
 
-            println!(
-                "\n\nAxis rots fused: x{} y{} z{}",
-                x_component, y_component, z_component
-            );
+            // println!(
+            //     "\n\nAxis rots fused: x{} y{} z{}",
+            //     x_component, y_component, z_component
+            // );
 
-            println!(
-                "Axis rots acc : x{} y{} z{}",
-                x_component_acc, y_component_acc, z_component_acc
-            );
+            // println!(
+            //     "Axis rots acc : x{} y{} z{}",
+            //     x_component_acc, y_component_acc, z_component_acc
+            // );
 
-            println!(
-                "Axis rots acc w hdg: x{} y{} z{}",
-                x_component_acc_h, y_component_acc_h, z_component_acc_h
-            );
+            // println!(
+            //     "Axis rots acc w hdg: x{} y{} z{}",
+            //     x_component_acc_h, y_component_acc_h, z_component_acc_h
+            // );
 
-            println!(
-                "Axis rots gyro: x{} y{} z{}",
-                x_component_gyro, y_component_gyro, z_component_gyro
-            );
+            // println!(
+            //     "Axis rots gyro: x{} y{} z{}",
+            //     x_component_gyro, y_component_gyro, z_component_gyro
+            // );
 
-            println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
+            // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
             println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
 
             println!("Acclen: {}", accel_data.magnitude());
@@ -528,7 +528,16 @@ pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
 
 /// Calculate heading, in radians, from the magnetometer's X and Y axes.
 pub fn heading_from_mag(mag: Vec3) -> f32 {
-    mag.y.atan2(mag.x)
+    // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
+    // TAU / 4. - mag.x.atan2(mag.y)
+
+    // From Honeywell guide
+
+    if mag.y > 0. {
+        TAU/4. - (mag.x / mag.y).atan()
+    } else {
+        3. * TAU/4. - (mag.x / mag.y).atan()
+    }
 }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.
