@@ -48,6 +48,11 @@ pub struct AhrsConfig {
     /// from acc.
     pub lin_acc_thresh: f32, // m/s^2
     pub calibration: crate::ImuCalibration,
+    /// Time, in seconds, after initialization, to start alignment procedure. This is set up so
+    /// powering the device on by plugging it in, etc, doesn't interfere.
+    pub start_alignment_time: u8,
+    /// Time, in seconds, of the alignment.
+    pub alignment_duration: u8,
 }
 
 impl Default for AhrsConfig {
@@ -56,12 +61,14 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
-            update_from_acc_amt: 0.3,
+            update_from_acc_amt: 0.4,
             update_port_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.2, // m/s^2
             lin_acc_thresh: 0.4,     // m/s^2
             calibration: Default::default(),
+            start_alignment_time: 2,
+            alignment_duration: 2,
         }
     }
 }
@@ -89,6 +96,10 @@ pub struct Ahrs {
     pub config: AhrsConfig,
     /// Time between updates, in seconds.
     dt: f32,
+    /// We set this var upon the first update; this forces the gyro to take a full update from the
+    /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
+    /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
+    initialized: bool,
 }
 
 impl Ahrs {
@@ -106,6 +117,7 @@ impl Ahrs {
             timestamp: 0.,
             config: AhrsConfig::default(),
             dt,
+            initialized: false,
         }
     }
 
@@ -121,12 +133,20 @@ impl Ahrs {
         // Estimate attitude from raw accelerometer and gyro data. Note that
         // The gyro data reguarly receives updates from the acc and mag.
         let att_acc = att_from_accel(accel_norm);
-        let att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
+
+        let mut att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
 
         let heading_gyro = heading_from_att(att_gyro);
 
         let z_rotation = find_z_rot(heading_gyro, accel_norm);
         let att_acc_w_heading = z_rotation * att_acc;
+
+        // See comment on the `initialized` field.
+        if !self.initialized {
+            self.att_from_gyros = att_acc_w_heading;
+            att_gyro = self.att_from_gyros;
+            self.initialized = true;
+        }
 
         let mut heading_fused = heading_gyro;
 
@@ -168,7 +188,8 @@ impl Ahrs {
 
                 self.heading_mag = Some(heading_mag);
 
-                if unsafe { i } % 1000 == 0 {
+                // if unsafe { i } % 1000 == 0 {
+                if false {
                     println!("mag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
 
                     println!("Heading mag: {}", heading_mag);
@@ -196,6 +217,10 @@ impl Ahrs {
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
         if update_gyro_from_acc {
+            // For now, always update gyro readings from the acc. This may be OK given we've removed ac.
+            // Experiment and see, once you have this hooked into corvus connected to preflight for a visual
+            // rep.
+            // if true {
             // https://stackoverflow.com/questions/12374087/average-of-multiple-quaternions
             // There are some sophisticated methods of average quaternions; eg involving
             // eigen values. For now, we cheat by simply averaging their values; this is probably
@@ -216,7 +241,8 @@ impl Ahrs {
             let rot_to_apply_to_gyro = Quaternion::new_identity()
                 .slerp(rot_gyro_to_acc, self.config.update_from_acc_amt * self.dt);
 
-            if unsafe { i } % 1000 == 0 {
+            // if unsafe { i } % 1000 == 0 {
+            if false {
                 let (x_component, y_component, z_component) = att_to_axes(rot_gyro_to_acc);
 
                 // println!(
@@ -263,7 +289,9 @@ impl Ahrs {
 
         static mut i: u32 = 0;
         unsafe { i += 1 };
-        if unsafe { i } % 1000 == 0 {
+
+        // if unsafe { i } % 1000 == 0 {
+        if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             let euler = self.attitude.to_euler();
@@ -390,6 +418,8 @@ impl Ahrs {
             self.linear_acc_cum / self.timestamp
         };
 
+        // todo: Update biases automatically for a short window after bootup.
+
         let lin_acc_estimate_bias_removed = lin_acc_estimate - lin_acc_bias;
 
         // If the magntidue of the acceleration is above this value, we are under linear acceleration,
@@ -409,9 +439,19 @@ impl Ahrs {
             update_gyro_from_acc = true;
         }
 
+        // todo: alignment fn
+        if self.timestamp > self.config.start_alignment_time as f32
+            && self.timestamp
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+        {
+            // Identify and remove linear bias.
+        }
+
         static mut i: u32 = 0;
         unsafe { i += 1 };
-        if unsafe { i } % 1000 == 0 {
+
+        // if unsafe { i } % 1000 == 0 {
+        if false {
             // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
@@ -438,11 +478,11 @@ impl Ahrs {
             // );
         }
 
-        if unsafe { i } % 100 == 0 {
-            if !update_gyro_from_acc {
-                println!("Under lin acc");
-            }
-        }
+        // if unsafe { i } % 100 == 0 {
+        //     if !update_gyro_from_acc {
+        //         println!("Under lin acc");
+        //     }
+        // }
 
         // todo: Temporarily not removing bias.
         (update_gyro_from_acc, lin_acc_estimate_bias_removed)
