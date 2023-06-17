@@ -6,9 +6,9 @@
 
 use num_traits::Float;
 
-use lin_alg2::f32::{Quaternion, Vec3};
+use lin_alg2::f32::{Vec3};
 
-use crate::{params::Params, Fix, FORWARD, RIGHT, UP};
+use crate::{params::Params, Fix};
 
 const FIX_FUSED_SIZE: usize = 36;
 
@@ -127,7 +127,7 @@ impl PositInertial {
         dt: f32, // seconds
     ) {
         // todo: Using this to experiment with new att platform
-        let mut accel_data = Vec3 {
+        let accel_data = Vec3 {
             x: params.a_x,
             y: params.a_y, // negative due to our IMU's coord system.
             z: params.a_z,
@@ -174,11 +174,11 @@ impl PositInertial {
         self.v_y += accel_lin.y * dt;
         self.v_z += accel_lin.z * dt;
 
-        static mut i: u32 = 0;
+        static mut I: u32 = 0;
 
-        unsafe { i += 1 };
+        unsafe { I += 1 };
 
-        if unsafe { i } % 2000 == 0 {
+        if unsafe { I } % 2000 == 0 {
             println!(
                 "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
                 self.x, self.y, self.z, self.v_x, self.v_y, self.v_z
@@ -203,7 +203,7 @@ impl PositInertial {
         PositEarthUnits {
             lat_e8: lat,
             lon_e8: lon,
-            elevation_msl: (self.anchor.elevation_msl as f32) / 1_000. + self.z,
+            elevation_msl: self.anchor.elevation_msl / 1_000. + self.z,
         }
     }
 }

@@ -14,7 +14,7 @@ use num_traits::float::Float; // abs etc
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::{ppks::PositEarthUnits, FORWARD, G, RIGHT, UP};
+use crate::{FORWARD, G, RIGHT, UP};
 
 use defmt::println;
 
@@ -90,12 +90,16 @@ pub struct Ahrs {
     /// Track recent changing in mag heading, per change in gyro heading, in degrees.
     /// We use this to assess magnetometer health, ie if it's being interfered with.
     /// This is `None` if there are no mag reading provided.
-    recent_dh_mag__dh_gyro: Option<f32>,
+    recent_dh_mag_dh_gyro: Option<f32>,
     /// Timestamp, in seconds.
     timestamp: f32,
     pub config: AhrsConfig,
     /// Time between updates, in seconds.
     dt: f32,
+    /// Radians
+    pub mag_inclination: f32,
+    /// Positive means "east" declination. radians.
+    pub mag_declination: f32,
     /// We set this var upon the first update; this forces the gyro to take a full update from the
     /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
     /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
@@ -111,12 +115,14 @@ impl Ahrs {
             heading_mag: None,
             heading_gyro: 0.,
             linear_acc_estimate: Vec3::new_zero(),
-            recent_dh_mag__dh_gyro: None,
+            recent_dh_mag_dh_gyro: None,
             // linear_acc_confidence: 0.,
             linear_acc_cum: Default::default(),
             timestamp: 0.,
             config: AhrsConfig::default(),
             dt,
+            mag_inclination: 1.2, // Rough
+            mag_declination: -0.032, // Raleigh
             initialized: false,
         }
     }
@@ -154,8 +160,7 @@ impl Ahrs {
         match mag_data {
             Some(mag) => {
                 let mag_norm = mag.to_normalized();
-                // let incliantion = -1.09;
-                // let att_mag = att_from_mag(mag_norm, incliantion);
+                let att_mag = att_from_mag(mag_norm, self.mag_inclination);
                 let heading_mag = heading_from_mag(mag);
 
                 // Assess magnetometer health by its comparison in rate change compared to the gyro.
@@ -165,22 +170,20 @@ impl Ahrs {
                         // todo: Since even a messed up mag seems to show constant readings
                         // todo when there is no rotation, consider only logging values here if
                         // todo dh/dt exceeds a certain value.
-                        self.recent_dh_mag__dh_gyro = Some(
+                        self.recent_dh_mag_dh_gyro = Some(
                             (heading_mag - heading_mag_prev) / self.dt
                                 - (heading_gyro - self.heading_gyro) / self.dt,
                         );
 
                         // Fuse heading from gyro with heading from mag.
-                        if self.recent_dh_mag__dh_gyro.unwrap().abs()
+                        if self.recent_dh_mag_dh_gyro.unwrap().abs()
                             < self.config.mag_gyro_diff_thresh
                         {
                             // heading_fused = (heading_prev * gyro_heading_weight + heading_mag * mag_heading_weight) / 2.;
                         }
-
-                        let update_port_gyro_heading = 1. - self.config.update_port_mag_heading;
                     }
                     None => {
-                        self.recent_dh_mag__dh_gyro = None;
+                        self.recent_dh_mag_dh_gyro = None;
                     }
                 }
 
@@ -188,16 +191,19 @@ impl Ahrs {
 
                 self.heading_mag = Some(heading_mag);
 
-                if unsafe { i } % 1000 == 0 {
-                // if false {
+                if unsafe { I } % 1000 == 0 {
+                    // if false {
                     println!("\n\nmag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
 
+                    let (x_component, y_component, z_component) = att_to_axes(att_mag);
+
+                    println!("Att mag: x{} y{} z{}", x_component, y_component, z_component);
                     println!("Heading mag: {}", heading_mag);
                     println!("Heading gyro: {}", heading_gyro);
                 }
             }
             None => {
-                self.recent_dh_mag__dh_gyro = None;
+                self.recent_dh_mag_dh_gyro = None;
             }
         }
 
@@ -283,12 +289,12 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
-        static mut i: u32 = 0;
-        unsafe { i += 1 };
+        static mut I: u32 = 0;
+        unsafe { I += 1 };
 
         // if unsafe { i } % 1000 == 0 {
         if false {
@@ -333,7 +339,7 @@ impl Ahrs {
 
             println!(
                 "Hdg diff mag gyro: {}",
-                self.recent_dh_mag__dh_gyro.unwrap_or(69.)
+                self.recent_dh_mag_dh_gyro.unwrap_or(69.)
             );
         }
     }
@@ -397,9 +403,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
+        // todo: Be careful about floating point errors over time.
+        // todo: Toss extreme values?
+        // todo: Lowpass?
 
         // Bias code below; for now, unused.
         self.linear_acc_cum += lin_acc_estimate * self.dt;
@@ -442,13 +448,13 @@ impl Ahrs {
         // todo: alignment fn
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             // Identify and remove linear bias.
         }
 
-        static mut i: u32 = 0;
-        unsafe { i += 1 };
+        static mut I: u32 = 0;
+        unsafe { I += 1 };
 
         // if unsafe { i } % 1000 == 0 {
         if false {
@@ -464,9 +470,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                                                          // lin_acc_estimate.y,
-                                                          // lin_acc_estimate.z,
-                                                          // lin_acc_estimate.magnitude()
+                // lin_acc_estimate.y,
+                // lin_acc_estimate.z,
+                // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -519,6 +525,7 @@ fn find_z_rot(heading: f32, accel_norm: Vec3) -> Quaternion {
 /// Inclination is in radians.
 // pub fn att_from_mag(mag: Vec3, posit: &PositEarthUnits) -> Quaternion {
 pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
+    // todo: -Right, or +right?
     let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
 
     let mag_field_vec = incl_rot.rotate_vec(FORWARD);
