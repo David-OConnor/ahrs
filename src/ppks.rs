@@ -20,7 +20,7 @@ use defmt::println;
 /// It doesn't include much of the metadata of a GNSS fix. We use Ublox
 /// conventions when able. For example, lat and lon are in deg / 1e7.
 /// todo: You may need to copy the exact bi lens of Fix2, and use PackedStruct.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PositFused {
     pub timestamp_us: u64, // microseconds
     pub lat_e8: i64,

@@ -5,7 +5,7 @@
 
 // use crate::{ppks::PositionFused};
 
-use crate::{Ahrs, ImuReadings};
+use crate::{Ahrs, ImuReadings, ppks::PositFused};
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
@@ -13,13 +13,14 @@ use lin_alg2::f32::{Quaternion, Vec3};
 /// frame of reference.
 #[derive(Default, Clone)]
 pub struct Params {
-    /// Latitude in degrees; fused.
-    pub lat_e8: i64,
-    /// Longitude in degrees; fused.
-    pub lon_e8: i64,
-    /// Altitude fused from GNSS, IMU, and maybe baro. In meters.
-    pub alt_msl_fused: f32,
-    /// MSL altitude in meters QFE (takeoff location is 0), from a barometer.
+    posit_fused: PositFused,
+    // /// Latitude in degrees; fused.
+    // pub lat_e8: i64,
+    // /// Longitude in degrees; fused.
+    // pub lon_e8: i64,
+    // /// Altitude fused from GNSS, IMU, and maybe baro. In meters.
+    // pub alt_msl_fused: f32,
+    // /// MSL altitude in meters QFE (takeoff location is 0), from a barometer.
     pub alt_msl_baro: f32,
     /// AGL altitude in meters, from the Time of flight sensor.
     pub alt_tof: Option<f32>,
@@ -101,27 +102,10 @@ impl Params {
 
         self.accel_linear = ahrs.linear_acc_estimate;
 
-        // let euler = attitude.to_euler();
-        // self.s_pitch = euler.pitch;
-        // self.s_roll = euler.roll;
-        // self.s_yaw_heading = euler.yaw;
-
         if let Some(mag) = mag_data {
             self.mag_x = mag.x;
             self.mag_y = mag.y;
             self.mag_z = mag.z;
         }
     }
-
-    // todo: PUt back once you merge PPKS to this mod.
-
-    // /// Update lat, lon, and MSL altitude values from our fused position
-    // pub fn update_positions_from_fused(&mut self, fused: &PositionFused) {
-    //     self.lat_e8 = fused.lat_e8;
-    //     self.lon_e8 = fused.lon_e8;
-    //     self.alt_msl_fused = fused.elevation_msl;
-    //     self.v_x = fused.ned_velocity[0];
-    //     self.v_y = fused.ned_velocity[1];
-    //     self.v_z = fused.ned_velocity[2];
-    // }
 }

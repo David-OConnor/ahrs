@@ -163,7 +163,7 @@ impl Ahrs {
             config: AhrsConfig::default(),
             cal: AhrsCal::default(),
             dt,
-            mag_inclination: 1.2,    // Rough
+            mag_inclination: -1.2,    // Rough
             mag_declination: -0.032, // Raleigh
             initialized: false,
         }
@@ -201,13 +201,21 @@ impl Ahrs {
         // Fuse with mag data if available.
         match mag_data {
             Some(mag) => {
-                let mag = self.cal.apply_mag_cal(mag);
+                let mut mag = self.cal.apply_mag_cal(mag);
+
+                // todo: Not sure why we have to do this swap.
+                // do the swap after applying cal.
+                let y = mag.y;
+                mag.y = mag.x;
+                mag.x = y;
+
                 let mag_norm = mag.to_normalized();
                 let att_mag = att_from_mag(mag_norm, self.mag_inclination);
 
                 // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
                 // todo under linear accel.
-                let heading_mag = heading_from_mag(mag_norm, att_acc);
+                // let heading_mag = heading_from_mag(mag_norm, att_acc);
+                let heading_mag = heading_from_att(att_mag);
 
                 // Assess magnetometer health by its comparison in rate change compared to the gyro.
                 match self.heading_mag {
@@ -378,7 +386,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -493,9 +501,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
+        // todo: Be careful about floating point errors over time.
+        // todo: Toss extreme values?
+        // todo: Lowpass?
 
         // todo: Update biases automatically for a short window after bootup.
 
@@ -530,9 +538,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                                                          // lin_acc_estimate.y,
-                                                          // lin_acc_estimate.z,
-                                                          // lin_acc_estimate.magnitude()
+                // lin_acc_estimate.y,
+                // lin_acc_estimate.z,
+                // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -559,7 +567,7 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
             // self.cal.linear_acc_cum += lin_acc_estimate;
@@ -567,7 +575,7 @@ impl Ahrs {
 
         if self.cal.acc_bias == Vec3::new_zero()
             && self.timestamp
-                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.acc_bias = self.cal.linear_acc_cum / self.config.alignment_duration as f32;
             println!("\n\nAlignment complete \n\n");
@@ -602,34 +610,38 @@ fn find_z_rot(heading: f32, accel_norm: Vec3) -> Quaternion {
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
 /// interference, and is noisy in general. Apply calibration prior to this step.
 /// Inclination is in radians.
-// pub fn att_from_mag(mag: Vec3, posit: &PositEarthUnits) -> Quaternion {
+/// todo: Automatically determine inclination by comparing att from this function
+/// todo with that from our AHRS.
+/// todo: Can you use this as a santity check of your ACC/Gyro heading, adn fuse it?
 pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
-    // todo: -Right, or +right?
-    let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
+    // todo: At this point, your mag points to the magnetic earth, ie partially north and partially down.
+    //
 
+    // `mag_field_vec` points towards magnetic earth, and into the earth IOC inlination.
+    let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
     let mag_field_vec = incl_rot.rotate_vec(FORWARD);
 
     Quaternion::from_unit_vecs(mag_field_vec, mag_norm)
 }
 
-/// Calculate heading, in radians, from the magnetometer's X and Y axes.
-pub fn heading_from_mag(mag_norm: Vec3, att_without_heading: Quaternion) -> f32 {
-    // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
-
-    // todo: Inv, or normal?
-    let mag_earth_ref = att_without_heading.inverse() * mag_norm;
-    // let mag_earth_ref = att_without_heading * mag_norm;
-
-    TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)
-
-    // From Honeywell guide
-    // todo: Is this equiv to atan2?
-    // if mag_earth_ref.y > 0. {
-    //     TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
-    // } else {
-    //     3. * TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
-    // }
-}
+// /// Calculate heading, in radians, from the magnetometer's X and Y axes.
+// pub fn heading_from_mag(mag_norm: Vec3, att_without_heading: Quaternion) -> f32 {
+//     // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
+//
+//     // todo: Inv, or normal?
+//     let mag_earth_ref = att_without_heading.inverse() * mag_norm;
+//     // let mag_earth_ref = att_without_heading * mag_norm;
+//
+//     TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)
+//
+//     // From Honeywell guide
+//     // todo: Is this equiv to atan2?
+//     // if mag_earth_ref.y > 0. {
+//     //     TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
+//     // } else {
+//     //     3. * TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
+//     // }
+// }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.
 /// dt is in seconds.
