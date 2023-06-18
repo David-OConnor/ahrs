@@ -26,6 +26,26 @@ static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
 
 use defmt::{println, write};
 
+/// Keeps tracking of a moving average for mag cal.
+#[derive(Default)]
+struct MagCalState {
+    pub hard_iron_moving_avg: Vec3,
+    pub current_len: u32,
+}
+
+impl MagCalState {
+    pub fn log_hard_iron(&mut self, new_val: Vec3) {
+        let current_len_f = self.current_len as f32;
+        self.hard_iron_moving_avg = Vec3::new(
+            ((self.hard_iron_moving_avg.x * current_len_f) + new_val.x) / self.current_len + 1,
+            ((self.hard_iron_moving_avg.y * current_len_f) + new_val.y) / self.current_len + 1,
+            ((self.hard_iron_moving_avg.z * current_len_f) + new_val.z) / self.current_len + 1,
+        );
+
+        self.current_len += 1;
+    }
+}
+
 pub struct AhrsConfig {
     /// How far to look back when determining linear acceleration bias from cumulative values. In seconds.
     pub lin_bias_lookback: f32,
@@ -95,7 +115,8 @@ pub struct AhrsCal {
     pub hard_iron: Vec3,
     pub soft_iron: Mat3,
     // todo: Remove the Quaternion if you don't need it, to save space.
-    pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+    // pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+    mag_cal_state: MagCalState,
 }
 
 impl Default for AhrsCal {
@@ -107,15 +128,23 @@ impl Default for AhrsCal {
             // Rough, from GPS mag can.
             hard_iron: Vec3::new(0.15, -0.05, -0.2),
             soft_iron: Mat3::new_identity(),
-            mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
+            // mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
+            mag_cal_state: Default::default(),
         }
     }
 }
 
 impl AhrsCal {
+    /// Apply the hard and soft iron offsets to our readings.
     pub fn apply_mag_cal(&self, mag_data: Vec3) -> Vec3 {
         // todo: Why this clone?
         self.soft_iron.clone() * (mag_data - self.hard_iron)
+    }
+
+    /// Update our iron offsets with that from the moving average. Run this once
+    /// calibration is complete.
+    pub fn update_hard_iron_from_cal(&mut self) {
+        self.hard_iron = self.mag_cal_state.hard_iron_moving_avg;
     }
 }
 
@@ -133,6 +162,9 @@ pub struct Ahrs {
     /// We use this to assess magnetometer health, ie if it's being interfered with.
     /// This is `None` if there are no mag reading provided.
     recent_dh_mag_dh_gyro: Option<f32>,
+    /// Use our gyro/acc fused attitude to estimate magnetic inclination.
+    mag_inclination_estimate: f32,
+    mag_cal_in_progress: bool,
     /// Timestamp, in seconds.
     timestamp: f32,
     pub config: AhrsConfig,
@@ -140,7 +172,7 @@ pub struct Ahrs {
     /// Time between updates, in seconds.
     dt: f32,
     /// Radians
-    pub mag_inclination: f32,
+    pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
     pub mag_declination: f32,
     /// We set this var upon the first update; this forces the gyro to take a full update from the
@@ -159,6 +191,8 @@ impl Ahrs {
             heading_gyro: 0.,
             linear_acc_estimate: Vec3::new_zero(),
             recent_dh_mag_dh_gyro: None,
+            mag_inclination_estimate: -1.2,
+            mag_cal_in_progress: false,
             timestamp: 0.,
             config: AhrsConfig::default(),
             cal: AhrsCal::default(),
@@ -200,8 +234,14 @@ impl Ahrs {
 
         // Fuse with mag data if available.
         match mag_data {
-            Some(mag) => {
-                let mut mag = self.cal.apply_mag_cal(mag);
+            Some(mut mag) => {
+                // todo: Is this where we want this?
+                if self.mag_cal_in_progress {
+                    self.cal.mag_cal_state.log_hard_iron(mag);
+                } else {
+                    let mut mag = self.cal.apply_mag_cal(mag);
+                }
+
 
                 // todo: Not sure why we have to do this swap.
                 // do the swap after applying cal.
@@ -257,7 +297,20 @@ impl Ahrs {
 
                     let (x_component, y_component, z_component) = att_mag.to_axes();
 
+                    // We use attitude from the accelerometer only here, to eliminate any
+                    // Z-axis component
+                    // todo: This is wrong. You need to find the angle only in the relevant plane.
+                    // let mag_earth_ref = att_acc.inverse() * mag_norm;
                     let mag_earth_ref = att_acc.inverse() * mag_norm;
+                    // We subtract TAU/4 since that's the difference between the grav reference of up,
+                    // and the inclination reference of forward.
+                    let inclination_estimated = -(mag_earth_ref.angle() - TAU/4.);
+
+                    let inclination_estimated = // todo?
+
+                    println!("Estimated mag incl: {:?}", inclination_estimated);
+
+
                     println!(
                         "Mag earth: x{} y{} z{}",
                         mag_earth_ref.x, mag_earth_ref.y, mag_earth_ref.z
@@ -267,6 +320,7 @@ impl Ahrs {
                         "Att mag: x{} y{} z{}",
                         x_component, y_component, z_component
                     );
+
                     println!("Heading mag: {}", heading_mag);
                     println!("Heading gyro: {}", heading_gyro);
                 }
@@ -613,11 +667,12 @@ fn find_z_rot(heading: f32, accel_norm: Vec3) -> Quaternion {
 /// todo: Automatically determine inclination by comparing att from this function
 /// todo with that from our AHRS.
 /// todo: Can you use this as a santity check of your ACC/Gyro heading, adn fuse it?
+/// todo: The likely play is to apply mag attitude corrections when under linear acceleration
+/// todo for long durations.
 pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
-    // todo: At this point, your mag points to the magnetic earth, ie partially north and partially down.
-    //
-
     // `mag_field_vec` points towards magnetic earth, and into the earth IOC inlination.
+
+    // let inclination = -1.2;
     let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
     let mag_field_vec = incl_rot.rotate_vec(FORWARD);
 
