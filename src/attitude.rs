@@ -87,6 +87,8 @@ pub struct Ahrs {
     /// remove biases, under the assumption that this should average out to 0, along
     /// each axis.
     linear_acc_cum: Vec3,
+    /// Bias, determined from the alignment process.
+    acc_bias: Vec3,
     /// Track recent changing in mag heading, per change in gyro heading, in degrees.
     /// We use this to assess magnetometer health, ie if it's being interfered with.
     /// This is `None` if there are no mag reading provided.
@@ -118,6 +120,7 @@ impl Ahrs {
             recent_dh_mag_dh_gyro: None,
             // linear_acc_confidence: 0.,
             linear_acc_cum: Default::default(),
+            acc_bias: Vec3::new_zero(),
             timestamp: 0.,
             config: AhrsConfig::default(),
             dt,
@@ -241,8 +244,8 @@ impl Ahrs {
 
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
             // much linear acceleration.
-            // let rot_gyro_to_acc = att_acc_w_heading * att_gyro.inverse();
-            let rot_gyro_to_acc = att_acc_w_lin_removed_and_heading * att_gyro.inverse();
+            let rot_gyro_to_acc = att_acc_w_heading * att_gyro.inverse();
+            // let rot_gyro_to_acc = att_acc_w_lin_removed_and_heading * att_gyro.inverse();
 
             let rot_to_apply_to_gyro = Quaternion::new_identity()
                 .slerp(rot_gyro_to_acc, self.config.update_from_acc_amt * self.dt);
@@ -407,26 +410,13 @@ impl Ahrs {
         // todo: Toss extreme values?
         // todo: Lowpass?
 
-        // Bias code below; for now, unused.
-        self.linear_acc_cum += lin_acc_estimate * self.dt;
-
-        // Important: This bias assumes acceleration evens out to 0 over time; this may or may not
-        // be a valid assumption, under various conditions.
-        // todo: Implement your timestamp, to keep bias computation over a set interval of time?
-        let lin_acc_bias = if self.timestamp < 0.00001 {
-            Vec3::new_zero()
-        } else {
-            // let _denominator = if self.timestamp > self.lin_bias_timeout {
-            //     self.lin_bias_timeout
-            // } else {
-            //     self.timestamp
-            // };
-            self.linear_acc_cum / self.timestamp
-        };
-
         // todo: Update biases automatically for a short window after bootup.
 
-        let lin_acc_estimate_bias_removed = lin_acc_estimate - lin_acc_bias;
+        if self.acc_bias == Vec3::new_zero() && self.timestamp > (self.config.start_alignment_time + self.config.alignment_duration) as f32 {
+            // self.acc_bias = self.linear_acc_cum / self.config.alignment_duration as f32
+        }
+        
+        let lin_acc_estimate_bias_removed = lin_acc_estimate - self.acc_bias;
 
         // If the magntidue of the acceleration is above this value, we are under linear acceleration,
         // and should ignore the accelerometer.
@@ -440,7 +430,7 @@ impl Ahrs {
             // this will produce false positives in some cases.
             update_gyro_from_acc = true;
             // } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
-        } else if lin_acc_estimate.magnitude() < self.config.lin_acc_thresh {
+        } else if lin_acc_estimate_bias_removed.magnitude() < self.config.lin_acc_thresh {
             // If not under much acceleration, re-cage our attitude.
             update_gyro_from_acc = true;
         }
@@ -450,18 +440,19 @@ impl Ahrs {
             && self.timestamp
             < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
-            // Identify and remove linear bias.
+            self.linear_acc_cum += lin_acc_estimate * self.dt;
+            // self.linear_acc_cum += lin_acc_estimate;
         }
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        // if unsafe { i } % 1000 == 0 {
-        if false {
+        if unsafe { I } % 1000 == 0 {
+            // if false {
             // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
-                lin_acc_bias.x, lin_acc_bias.y, lin_acc_bias.z,
+                self.acc_bias.x, self.acc_bias.y, self.acc_bias.z,
             );
 
             println!(
