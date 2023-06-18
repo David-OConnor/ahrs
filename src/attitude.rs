@@ -8,15 +8,23 @@
 
 // todo: We are currently moving away from the AHRS Fusion port.
 
-use core::f32::consts::TAU;
+use core::{
+    f32::consts::TAU,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use num_traits::float::Float; // abs etc
 
-use lin_alg2::f32::{Quaternion, Vec3};
+use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 
 use crate::{FORWARD, G, RIGHT, UP};
 
-use defmt::println;
+// Per axis. Setting this too high will trigger too much (flash? ram?) use. You should get an error
+// on compile or launch.
+const MAG_CAL_DATA_LEN: usize = 100;
+static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
+
+use defmt::{println, write};
 
 pub struct AhrsConfig {
     /// How far to look back when determining linear acceleration bias from cumulative values. In seconds.
@@ -53,6 +61,8 @@ pub struct AhrsConfig {
     pub start_alignment_time: u8,
     /// Time, in seconds, of the alignment.
     pub alignment_duration: u8,
+    /// Time in seconds between each magnetometer calibration reading.
+    pub mag_cal_timestep: f32,
 }
 
 impl Default for AhrsConfig {
@@ -69,7 +79,43 @@ impl Default for AhrsConfig {
             calibration: Default::default(),
             start_alignment_time: 2,
             alignment_duration: 2,
+            mag_cal_timestep: 0.05,
         }
+    }
+}
+
+pub struct AhrsCal {
+    /// linear acceleration, per axis, integrated over time. We use this to
+    /// remove biases, under the assumption that this should average out to 0, along
+    /// each axis.
+    pub linear_acc_cum: Vec3,
+    /// Bias, determined from the alignment process.
+    /// todo note: We also have an acc offset calibration process upstream, eg in Corvus and GNSS can
+    pub acc_bias: Vec3,
+    pub hard_iron: Vec3,
+    pub soft_iron: Mat3,
+    // todo: Remove the Quaternion if you don't need it, to save space.
+    pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+}
+
+impl Default for AhrsCal {
+    fn default() -> Self {
+        Self {
+            linear_acc_cum: Vec3::new_zero(),
+            acc_bias: Vec3::new_zero(),
+            // hard_iron: Vec3::new_zero(),
+            // Rough, from GPS mag can.
+            hard_iron: Vec3::new(0.15, -0.05, -0.2),
+            soft_iron: Mat3::new_identity(),
+            mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
+        }
+    }
+}
+
+impl AhrsCal {
+    pub fn apply_mag_cal(&self, mag_data: Vec3) -> Vec3 {
+        // todo: Why this clone?
+        self.soft_iron.clone() * (mag_data - self.hard_iron)
     }
 }
 
@@ -83,12 +129,6 @@ pub struct Ahrs {
     // att_from_mag: Quaternion,
     pub linear_acc_estimate: Vec3,
     // linear_acc_confidence: f32, // todo?
-    /// linear acceleration, per axis, integrated over time. We use this to
-    /// remove biases, under the assumption that this should average out to 0, along
-    /// each axis.
-    linear_acc_cum: Vec3,
-    /// Bias, determined from the alignment process.
-    acc_bias: Vec3,
     /// Track recent changing in mag heading, per change in gyro heading, in degrees.
     /// We use this to assess magnetometer health, ie if it's being interfered with.
     /// This is `None` if there are no mag reading provided.
@@ -96,6 +136,7 @@ pub struct Ahrs {
     /// Timestamp, in seconds.
     timestamp: f32,
     pub config: AhrsConfig,
+    pub cal: AhrsCal,
     /// Time between updates, in seconds.
     dt: f32,
     /// Radians
@@ -118,13 +159,11 @@ impl Ahrs {
             heading_gyro: 0.,
             linear_acc_estimate: Vec3::new_zero(),
             recent_dh_mag_dh_gyro: None,
-            // linear_acc_confidence: 0.,
-            linear_acc_cum: Default::default(),
-            acc_bias: Vec3::new_zero(),
             timestamp: 0.,
             config: AhrsConfig::default(),
+            cal: AhrsCal::default(),
             dt,
-            mag_inclination: 1.2, // Rough
+            mag_inclination: 1.2,    // Rough
             mag_declination: -0.032, // Raleigh
             initialized: false,
         }
@@ -162,9 +201,13 @@ impl Ahrs {
         // Fuse with mag data if available.
         match mag_data {
             Some(mag) => {
+                let mag = self.cal.apply_mag_cal(mag);
                 let mag_norm = mag.to_normalized();
                 let att_mag = att_from_mag(mag_norm, self.mag_inclination);
-                let heading_mag = heading_from_mag(mag);
+
+                // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
+                // todo under linear accel.
+                let heading_mag = heading_from_mag(mag_norm, att_acc);
 
                 // Assess magnetometer health by its comparison in rate change compared to the gyro.
                 match self.heading_mag {
@@ -196,13 +239,56 @@ impl Ahrs {
 
                 if unsafe { I } % 1000 == 0 {
                     // if false {
-                    println!("\n\nmag vec: x{} y{} z{}", mag_norm.x, mag_norm.y, mag_norm.z);
+                    println!(
+                        "\n\nMag vec: x{} y{} z{} len{}",
+                        mag_norm.x,
+                        mag_norm.y,
+                        mag_norm.z,
+                        mag.magnitude()
+                    );
 
-                    let (x_component, y_component, z_component) = att_to_axes(att_mag);
+                    let (x_component, y_component, z_component) = att_mag.to_axes();
 
-                    println!("Att mag: x{} y{} z{}", x_component, y_component, z_component);
+                    let mag_earth_ref = att_acc.inverse() * mag_norm;
+                    println!(
+                        "Mag earth: x{} y{} z{}",
+                        mag_earth_ref.x, mag_earth_ref.y, mag_earth_ref.z
+                    );
+
+                    println!(
+                        "Att mag: x{} y{} z{}",
+                        x_component, y_component, z_component
+                    );
                     println!("Heading mag: {}", heading_mag);
                     println!("Heading gyro: {}", heading_gyro);
+                }
+
+                static mut MAG_CAL_COMPLETE: bool = false;
+                static mut MAG_CAL_PRINTED: bool = false;
+                // todo: use your stored config value, vice this magic 50.
+                if unsafe { !MAG_CAL_COMPLETE } && unsafe { I } % 100 == 0 {
+                    let i = MAG_CAL_I.fetch_add(1, Ordering::Relaxed);
+
+                    if i == MAG_CAL_DATA_LEN {
+                        unsafe {
+                            MAG_CAL_COMPLETE = true;
+                        }
+                    } else {
+                        self.cal.mag_cal_data[i] = (self.attitude, mag);
+                    }
+                }
+
+                unsafe {
+                    if MAG_CAL_COMPLETE && !MAG_CAL_PRINTED {
+                        println!("\n\n[");
+                        for data in self.cal.mag_cal_data {
+                            println!("({}, {}, {}),", data.1.x, data.1.y, data.1.z);
+                        }
+
+                        println!("\n\n]");
+
+                        MAG_CAL_PRINTED = true;
+                    }
                 }
             }
             None => {
@@ -252,14 +338,14 @@ impl Ahrs {
 
             // if unsafe { i } % 1000 == 0 {
             if false {
-                let (x_component, y_component, z_component) = att_to_axes(rot_gyro_to_acc);
+                let (x_component, y_component, z_component) = rot_gyro_to_acc.to_axes();
 
                 // println!(
                 //     "\n\nRot gyro to get to acc: x{} y{} z{}",
                 //     x_component, y_component, z_component
                 // );
                 //
-                // let (x_component, y_component, z_component) = att_to_axes(rot_to_apply_to_gyro);
+                // let (x_component, y_component, z_component) = rot_to_apply_to_gyro.to_axes();
                 //
                 println!(
                     "Rot to apply: x{} y{} z{}",
@@ -292,7 +378,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -305,13 +391,12 @@ impl Ahrs {
 
             let euler = self.attitude.to_euler();
 
-            let (x_component, y_component, z_component) = att_to_axes(self.attitude);
-            let (x_component_acc, y_component_acc, z_component_acc) =
-                att_to_axes(self.att_from_acc);
+            let (x_component, y_component, z_component) = self.attitude.to_axes();
+            let (x_component_acc, y_component_acc, z_component_acc) = self.att_from_acc.to_axes();
             let (x_component_acc_h, y_component_acc_h, z_component_acc_h) =
-                att_to_axes(att_acc_w_heading);
+                att_acc_w_heading.to_axes();
             let (x_component_gyro, y_component_gyro, z_component_gyro) =
-                att_to_axes(self.att_from_gyros);
+                self.att_from_gyros.to_axes();
 
             // println!(
             //     "\n\nAxis rots fused: x{} y{} z{}",
@@ -404,24 +489,17 @@ impl Ahrs {
         // that determined by the gyro.
         let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * G);
 
+        self.align(lin_acc_estimate);
+
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
 
         // todo: Update biases automatically for a short window after bootup.
 
-        if self.acc_bias == Vec3::new_zero() && self.timestamp > (self.config.start_alignment_time + self.config.alignment_duration) as f32 {
-            // self.acc_bias = self.linear_acc_cum / self.config.alignment_duration as f32
-        }
-        
-        let lin_acc_estimate_bias_removed = lin_acc_estimate - self.acc_bias;
-
-        // If the magntidue of the acceleration is above this value, we are under linear acceleration,
-        // and should ignore the accelerometer.
-        // let acc_magnitude_thresh_lower = G * self.config.acc_mag_threshold_no_lin.0;
-        // let acc_magnitude_thresh_upper = G * self.config.acc_mag_threshold_no_lin.1;
+        let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.acc_bias;
 
         let mut update_gyro_from_acc = false;
         // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
@@ -435,15 +513,6 @@ impl Ahrs {
             update_gyro_from_acc = true;
         }
 
-        // todo: alignment fn
-        if self.timestamp > self.config.start_alignment_time as f32
-            && self.timestamp
-            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
-        {
-            self.linear_acc_cum += lin_acc_estimate * self.dt;
-            // self.linear_acc_cum += lin_acc_estimate;
-        }
-
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
@@ -452,7 +521,7 @@ impl Ahrs {
             // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
-                self.acc_bias.x, self.acc_bias.y, self.acc_bias.z,
+                self.cal.acc_bias.x, self.cal.acc_bias.y, self.cal.acc_bias.z,
             );
 
             println!(
@@ -461,9 +530,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                // lin_acc_estimate.y,
-                // lin_acc_estimate.z,
-                // lin_acc_estimate.magnitude()
+                                                          // lin_acc_estimate.y,
+                                                          // lin_acc_estimate.z,
+                                                          // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -484,6 +553,25 @@ impl Ahrs {
         // todo: Temporarily not removing bias.
         (update_gyro_from_acc, lin_acc_estimate_bias_removed)
         // (update_gyro_from_acc, lin_acc_estimate)
+    }
+
+    /// Assumes no linear acceleration. Estimates linear acceleration biases.
+    fn align(&mut self, lin_acc_estimate: Vec3) {
+        if self.timestamp > self.config.start_alignment_time as f32
+            && self.timestamp
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+        {
+            self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
+            // self.cal.linear_acc_cum += lin_acc_estimate;
+        }
+
+        if self.cal.acc_bias == Vec3::new_zero()
+            && self.timestamp
+                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+        {
+            self.cal.acc_bias = self.cal.linear_acc_cum / self.config.alignment_duration as f32;
+            println!("\n\nAlignment complete \n\n");
+        }
     }
 }
 
@@ -525,17 +613,22 @@ pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
 }
 
 /// Calculate heading, in radians, from the magnetometer's X and Y axes.
-pub fn heading_from_mag(mag: Vec3) -> f32 {
+pub fn heading_from_mag(mag_norm: Vec3, att_without_heading: Quaternion) -> f32 {
     // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
-    // TAU / 4. - mag.x.atan2(mag.y)
+
+    // todo: Inv, or normal?
+    let mag_earth_ref = att_without_heading.inverse() * mag_norm;
+    // let mag_earth_ref = att_without_heading * mag_norm;
+
+    TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)
 
     // From Honeywell guide
-
-    if mag.y > 0. {
-        TAU/4. - (mag.x / mag.y).atan()
-    } else {
-        3. * TAU/4. - (mag.x / mag.y).atan()
-    }
+    // todo: Is this equiv to atan2?
+    // if mag_earth_ref.y > 0. {
+    //     TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
+    // } else {
+    //     3. * TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
+    // }
 }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.
@@ -580,20 +673,4 @@ pub fn find_accel_offset(posit_offset: Vec3, gyro_readings: Vec3) -> Vec3 {
 
     // todo: QC these
     posit_offset.cross(rot_axis * rot_angle)
-}
-
-/// Convert an attitude to rotations around individual axes.
-pub fn att_to_axes(att: Quaternion) -> (f32, f32, f32) {
-    let axis = att.axis();
-    let angle = att.angle();
-
-    let sign_x = -axis.x.signum();
-    let sign_y = -axis.y.signum();
-    let sign_z = -axis.z.signum();
-
-    let x_component = (axis.project_to_vec(RIGHT) * angle).magnitude() * sign_x;
-    let y_component = (axis.project_to_vec(FORWARD) * angle).magnitude() * sign_y;
-    let z_component = (axis.project_to_vec(UP) * angle).magnitude() * sign_z;
-
-    (x_component, y_component, z_component)
 }

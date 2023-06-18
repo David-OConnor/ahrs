@@ -19,7 +19,7 @@ pub use crate::{attitude::Ahrs, params::Params};
 
 use chrono::NaiveDateTime;
 use lin_alg2::f32::{Quaternion, Vec3};
-use num_enum::{TryFromPrimitive};
+use num_enum::TryFromPrimitive;
 
 // todo: Try this : https://github.com/Mayitzin/ahrs/blob/master/ahrs/filters/ekf.py
 
