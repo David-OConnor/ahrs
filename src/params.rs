@@ -5,7 +5,7 @@
 
 // use crate::{ppks::PositionFused};
 
-use crate::{Ahrs, ImuReadings, ppks::PositFused};
+use crate::{ppks::PositFused, Ahrs, ImuReadings};
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
@@ -85,14 +85,14 @@ impl Params {
         self.v_roll = imu_data.v_roll;
         self.v_yaw = imu_data.v_yaw;
 
-        let cal = &ahrs.config.calibration;
+        let cal = &ahrs.cal;
 
         // Update in-place to since we pass this to the attitude-finder.
         let mut imu_data2 = (*imu_data).clone();
 
-        imu_data2.a_x = imu_data.a_x * cal.acc_slope_x + cal.acc_intercept_x;
-        imu_data2.a_y = imu_data.a_y * cal.acc_slope_y + cal.acc_intercept_y;
-        imu_data2.a_z = imu_data.a_z * cal.acc_slope_z + cal.acc_intercept_z;
+        imu_data2.a_x = imu_data.a_x * cal.acc_slope.x - cal.acc_bias.x;
+        imu_data2.a_y = imu_data.a_y * cal.acc_slope.y - cal.acc_bias.y;
+        imu_data2.a_z = imu_data.a_z * cal.acc_slope.z - cal.acc_bias.z;
 
         self.a_x = imu_data2.a_x;
         self.a_y = imu_data2.a_y;

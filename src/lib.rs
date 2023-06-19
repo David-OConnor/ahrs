@@ -14,6 +14,7 @@
 pub mod attitude;
 pub mod params;
 pub mod ppks;
+// mod mag_ellipsoid_fitting;
 
 pub use crate::{attitude::Ahrs, params::Params};
 
@@ -58,39 +59,6 @@ pub const RIGHT: Vec3 = Vec3 {
     z: 0.,
 };
 
-/// Apply this linear map to raw IMU readings to get calibrated ones, that should always
-/// return 1G of acceleration if no linear acceleration is applied.
-pub struct ImuCalibration {
-    pub acc_slope_x: f32,
-    pub acc_intercept_x: f32,
-    pub acc_slope_y: f32,
-    pub acc_intercept_y: f32,
-    pub acc_slope_z: f32,
-    pub acc_intercept_z: f32,
-}
-
-impl Default for ImuCalibration {
-    fn default() -> Self {
-        Self {
-            acc_slope_x: 1.,
-            acc_intercept_x: 0.,
-            acc_slope_y: 1.,
-            acc_intercept_y: 0.,
-            acc_slope_z: 1.,
-            acc_intercept_z: 0.,
-        }
-    }
-}
-
-impl ImuCalibration {
-    /// Run this when the device is stationary on a flat surface, with the Z axis up,
-    /// to initiate acceleratometer calibration. Updates intercepts only. Readings are in m/s.
-    pub fn calibrate_accel(&mut self, acc_data: Vec3) {
-        self.acc_intercept_x = -acc_data.x;
-        self.acc_intercept_y = -acc_data.y;
-        self.acc_intercept_z = G - acc_data.z;
-    }
-}
 
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
