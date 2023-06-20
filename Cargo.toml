@@ -16,6 +16,5 @@ num_enum = { version = "^0.6.1", default_features = false }
 # `Chrono` for GNSS timestamp
 chrono = { version = "^0.4.23", default-features = false }
 
-# todo: Experimental for magnetometer ellipse modelling
-nalgebra = { version = "^0.32.2", default-features = false}
-#ndarray = { version = "^0.15.6", default-features = false}
+# For magnetometer ellipsoid fitting. `libm` feature required for inverse and eigen.
+nalgebra = { version = "^0.32.2", default-features = false, features = ["libm"]}

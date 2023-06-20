@@ -19,10 +19,11 @@ use lin_alg2::f32::{Mat3, Mat4, Quaternion, Vec3};
 
 use crate::{FORWARD, G, RIGHT, UP};
 
-// Per axis. Setting this too high will trigger too much (flash? ram?) use. You should get an error
-// on compile or launch.
-pub(crate) const MAG_CAL_DATA_LEN: usize = 100;
-static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
+// static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
+
+use crate::mag_ellipsoid_fitting::{
+    MAG_CAL_DATA_LEN, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES,
+};
 
 use defmt::{println, write};
 
@@ -104,7 +105,9 @@ pub struct AhrsCal {
     pub hard_iron: Vec3,
     pub soft_iron: Mat3,
     // todo: Remove the Quaternion if you don't need it, to save space.
-    pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+    // pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+    pub mag_cal_data: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
+    mag_sample_i: [usize; SAMPLE_VERTICES.len()],
     // mag_cal_state: MagCalState,
 }
 
@@ -121,7 +124,9 @@ impl Default for AhrsCal {
             // hard_iron: Vec3::new(0.10, 0.15, -0.4),
             hard_iron: Vec3::new(-0.05, 0.16, -0.2),
             soft_iron: Mat3::new_identity(),
-            mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
+            // mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
+            mag_cal_data: [[0.; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
+            mag_sample_i: Default::default(),
             // mag_cal_state: Default::default(),
         }
     }
@@ -149,6 +154,29 @@ impl AhrsCal {
     pub fn estimate_hard_iron(&mut self) {
         // self.hard_iron =
     }
+
+    /// Run this once every x updates.
+    /// Stores a calibration point into a directional category. The aim is to evenly mix samples taked
+    /// at ~evenly-spaced attitudes, despite attitudes not being distributed evenly over time.
+    /// This collects readings, then performs calibration once enough are taken in each category.
+    pub fn log_mag_cal_pt(&mut self, att: Quaternion, mag_raw: Vec3) {
+        // Indexed by the sample vec vertices.
+        let mut sample_category = 0;
+        for (cat, sample) in SAMPLE_VERTICES.iter().enumerate() {
+            // `UP` is arbitrary; any Vec will do as long as we're consistent.
+            let up_rotated = att.rotate_vec(UP);
+            if (up_rotated.dot(*sample)).acos() < SAMPLE_VERTEX_ANGLE {
+                sample_category = cat;
+                break;
+            }
+        }
+
+        unsafe {
+            self.mag_cal_data[sample_category][self.mag_sample_i[sample_category]] = mag_raw;
+            self.mag_sample_i[sample_category] =
+                (self.mag_sample_i[sample_category] + 1) % MAG_SAMPLES_PER_CAT;
+        }
+    }
 }
 
 pub struct Ahrs {
@@ -167,7 +195,7 @@ pub struct Ahrs {
     recent_dh_mag_dh_gyro: Option<f32>,
     /// Use our gyro/acc fused attitude to estimate magnetic inclination.
     mag_inclination_estimate: f32,
-    mag_cal_in_progress: bool,
+    // mag_cal_in_progress: bool,
     /// Timestamp, in seconds.
     timestamp: f32,
     pub config: AhrsConfig,
@@ -196,7 +224,7 @@ impl Ahrs {
             linear_acc_estimate: Vec3::new_zero(),
             recent_dh_mag_dh_gyro: None,
             mag_inclination_estimate: -1.2,
-            mag_cal_in_progress: true, // todo temp true
+            // mag_cal_in_progress: true, // todo temp true
             timestamp: 0.,
             config: AhrsConfig::default(),
             cal: AhrsCal::default(),
@@ -513,13 +541,15 @@ impl Ahrs {
     }
 
     fn handle_mag(&mut self, mut mag: Vec3, heading_gyro: f32, i: u32) {
-        // todo: Is this where we want this?
-        if self.mag_cal_in_progress {
-            // self.cal.mag_cal_state.log_hard_iron(mag);
-            // return;
-        } else {
-            let mut mag = self.cal.apply_mag_cal(mag);
-        }
+        // // todo: Is this where we want this?
+        // if self.mag_cal_in_progress {
+        //     // self.cal.mag_cal_state.log_hard_iron(mag);
+        //     // return;
+        // } else {
+        //     let mut mag = self.cal.apply_mag_cal(mag);
+        // }
+        //
+        let mut mag = self.cal.apply_mag_cal(mag);
 
         const EPS: f32 = 0.0000001;
         if mag.x.abs() < EPS && mag.y.abs() < EPS && mag.z.abs() < EPS {
@@ -636,30 +666,30 @@ impl Ahrs {
             println!("Heading mag: {}", heading_mag);
         }
 
-        static mut MAG_CAL_PRINTED: bool = false;
-        // todo: use your stored config value, vice this magic 50.
-        if self.mag_cal_in_progress && i % 100 == 0 {
-            let i = MAG_CAL_I.fetch_add(1, Ordering::Relaxed);
-
-            if i == MAG_CAL_DATA_LEN {
-                self.mag_cal_in_progress = false;
-            } else {
-                self.cal.mag_cal_data[i] = (self.attitude, mag);
-            }
-        }
-
-        unsafe {
-            if !self.mag_cal_in_progress && !MAG_CAL_PRINTED {
-                println!("\n\n[");
-                for data in self.cal.mag_cal_data {
-                    println!("({}, {}, {}),", data.1.x, data.1.y, data.1.z);
-                }
-
-                println!("\n\n]");
-
-                MAG_CAL_PRINTED = true;
-            }
-        }
+        // static mut MAG_CAL_PRINTED: bool = false;
+        // // todo: use your stored config value, vice this magic 50.
+        // if self.mag_cal_in_progress && i % 100 == 0 {
+        //     let i = MAG_CAL_I.fetch_add(1, Ordering::Relaxed);
+        //
+        //     if i == MAG_CAL_DATA_LEN {
+        //         self.mag_cal_in_progress = false;
+        //     } else {
+        //         self.cal.mag_cal_data[i] = (self.attitude, mag);
+        //     }
+        // }
+        //
+        // unsafe {
+        //     if !self.mag_cal_in_progress && !MAG_CAL_PRINTED {
+        //         println!("\n\n[");
+        //         for data in self.cal.mag_cal_data {
+        //             println!("({}, {}, {}),", data.1.x, data.1.y, data.1.z);
+        //         }
+        //
+        //         println!("\n\n]");
+        //
+        //         MAG_CAL_PRINTED = true;
+        //     }
+        // }
     }
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.

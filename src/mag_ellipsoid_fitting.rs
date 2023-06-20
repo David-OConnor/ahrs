@@ -11,15 +11,58 @@
 
 use nalgebra as na;
 // use ndarray;
-use na::{Matrix3, Matrix4, RowVector3, RowVector4};
+use na::{ArrayStorage, Const, Matrix3, Matrix4, RowVector3, RowVector4, SMatrix, SVector};
 
 use num_traits::Float;
-
-use crate::attitude::MAG_CAL_DATA_LEN;
 
 use lin_alg2::f32::{Mat3, Mat4, Vec3};
 
 use defmt::println;
+
+/// Vectors of attitudes the craft is at while taking elipsoid sample points. Make sure there
+/// are several points near each of these prior to calibrating.
+/// Dodecahedron vertices.
+/// https://math.fandom.com/wiki/Dodecahedron
+const PHI: f32 = 1.6180339887; // 1/2 + (5/4).sqrt()
+
+// todo: If this doesn't compile:
+// use core::cell::OnceCell;
+// static SAMPLE_VECS = OnceCell::new();
+// SAMPLE_VECS.set().unwrap();
+// todo: Normalize these!
+pub const SAMPLE_VERTICES: [Vec3; 20] = [
+    Vec3::new(1., 1., 1.),
+    Vec3::new(1., 1., -1.),
+    Vec3::new(1., -1., 1.),
+    Vec3::new(1., -1., -1.),
+    //
+    Vec3::new(-1., 1., 1.),
+    Vec3::new(-1., 1., -1.),
+    Vec3::new(-1., -1., 1.),
+    Vec3::new(-1., -1., -1.),
+    //
+    Vec3::new(0., 1. / PHI, PHI),
+    Vec3::new(0., 1. / PHI, -PHI),
+    Vec3::new(0., -1. / PHI, PHI),
+    Vec3::new(0., -1. / PHI, -PHI),
+    //
+    Vec3::new(1. / PHI, PHI, 0.),
+    Vec3::new(1. / PHI, -PHI, 0.),
+    Vec3::new(-1. / PHI, PHI, 0.),
+    Vec3::new(-1. / PHI, -PHI, 0.),
+    //
+    Vec3::new(PHI, 0., 1. / PHI),
+    Vec3::new(PHI, 0., -1. / PHI),
+    Vec3::new(-PHI, 0., 1. / PHI),
+    Vec3::new(-PHI, 0., -1. / PHI),
+];
+
+// The angular distance between neighboring sample vecs. If a quaternion's *up* vec (We chose this
+// arbitrarily; any vec will do) is closer than this to a sample vec, we group it with that sample vec.
+pub const SAMPLE_VERTEX_ANGLE: f32 = 0.7297276562166872;
+
+// We need at least this many samples per category before calibrating.
+pub const MAG_SAMPLES_PER_CAT: usize = 10;
 
 /// least squares fit to a 3D-ellipsoid
 /// Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz  = 1
@@ -50,7 +93,7 @@ fn ls_ellipsoid(
     // let J_storate = nalgebra::base::ArrayStorage<f32, MAG_CAL_DATA_LEN, 9>
 
     // let mut J = na::DMatrix::from_diagonal_elements(MAG_CAL_DATA_LEN, 9, 1.);
-    let j_data = [0.0_f32; MAG_CAL_DATA_LEN * 9];
+    // let j_data = [0.0_f32; MAG_CAL_DATA_LEN * 9];
     // let mut J = na::MatrixView::from_slice_with_strides_generic(
     //     &j_data,
     //     9,
@@ -59,39 +102,49 @@ fn ls_ellipsoid(
     //     MAG_CAL_DATA_LEN * 8,
     // );
 
-    let j_storage = na::ArrayStorage::new(j_data);
-    let mut J: na::SMatrix<f32, MAG_CAL_DATA_LEN, 9> = na::SMatrix::from_array_storage(j_storage);
+    // let j_storage = ArrayStorage::new(j_data);
+    // let mut J: SMatrix<f32, MAG_CAL_DATA_LEN, 9> = SMatrix::from_array_storage(j_storage);
+    //  Const<4>, Const<MAG_CAL_DATA_LEN> etc?
+    let mut J: SMatrix<f32, MAG_CAL_DATA_LEN, 9> = SMatrix::zeros();
 
     for i in 0..MAG_CAL_DATA_LEN {
         let (xi, yi, zi) = (x[i], y[i], z[i]);
-        J[i] = [
-            xi * xi,
-            yi * yi,
-            zi * zi,
-            xi * yi,
-            xi * zi,
-            yi * zi,
-            xi,
-            yi,
-            zi,
-        ];
+        J.set_row(
+            i,
+            &na::RowSVector::from([
+                xi * xi,
+                yi * yi,
+                zi * zi,
+                xi * yi,
+                xi * zi,
+                yi * zi,
+                xi,
+                yi,
+                zi,
+            ]),
+        );
     }
 
-    let K = [1.; MAG_CAL_DATA_LEN]; // column of ones
+    // column of ones
+    let K: SVector<f32, MAG_CAL_DATA_LEN> = SVector::from([1.; MAG_CAL_DATA_LEN]);
+    // let K = [1.; MAG_CAL_DATA_LEN];
 
     let JT = J.transpose();
-    let JTJ = JT.dot(J);
-    let InvJTJ = JTJ.inverse();
-    let ABC = InvJTJ * (JT.dot(K));
+    let JTJ = JT * J;
+    let InvJTJ = JTJ.try_inverse().unwrap();
+    let ABC = InvJTJ * (JT * K);
 
     // Rearrange, move the 1 to the other side
     //  Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz - 1 = 0
     //    or
     //  Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz + J = 0
     //  where J = -1
-    let mut result = [0.; 10];
-    result[0..9].copy_from_slice(ABC[0..9]);
-    result[9] = -1.; // J term
+    // let mut result = [0.; 10];
+    // result[0..9].copy_from_slice(ABC[0..9]);
+    // result[9] = -1.; // J term
+    let result = [
+        ABC[0], ABC[1], ABC[2], ABC[3], ABC[4], ABC[5], ABC[6], ABC[7], ABC[8], -1.,
+    ];
 
     result
 }
@@ -114,12 +167,24 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
     // ]);
 
     let c = &coeffs;
-    let Amat = na::Matrix4::from_rows(&[
-        RowVector4::new(c[0], c[3] / 2.0, c[4] / 2.0, c[6] / 2.0),
-        RowVector4::new(c[3] / 2.0, c[1], c[5] / 2.0, c[7] / 2.0),
-        RowVector4::new(c[4] / 2.0, c[5] / 2.0, c[2], c[8] / 2.0),
-        RowVector4::new(c[6] / 2.0, c[7] / 2.0, c[8] / 2.0, c[9]),
-    ]);
+    let Amat = Matrix4::new(
+        c[0],
+        c[3] / 2.0,
+        c[4] / 2.0,
+        c[6] / 2.0,
+        c[3] / 2.0,
+        c[1],
+        c[5] / 2.0,
+        c[7] / 2.0,
+        c[4] / 2.0,
+        c[5] / 2.0,
+        c[2],
+        c[8] / 2.0,
+        c[6] / 2.0,
+        c[7] / 2.0,
+        c[8] / 2.0,
+        c[9],
+    );
 
     // println!(""\nAlgebraic form of polynomial\n',Amat");"
 
@@ -138,30 +203,39 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
     //     vec[5],
     //     vec[2],
     // ]);
+    //
 
-    let A3 = Matrix3::from_rows(&[
-        RowVector3::new(c[0], c[3] / 2.0, c[4] / 2.0),
-        RowVector3::new(c[3] / 2.0, c[1], c[5] / 2.0),
-        RowVector3::new(c[4] / 2.0, c[5] / 2.0, c[2]),
-    ]);
+    let A3 = Matrix3::new(
+        c[0],
+        c[3] / 2.0,
+        c[4] / 2.0,
+        c[3] / 2.0,
+        c[1],
+        c[5] / 2.0,
+        c[4] / 2.0,
+        c[5] / 2.0,
+        c[2],
+    );
 
-    let A3_inv = A3.inverse();
+    let A3_inv = A3.try_inverse().unwrap();
 
-    let ofs = Vec3::new(c[6], c[7], c[8]) / 2.;
-    let center = -(A3_inv.dot(ofs));
+    // let ofs = Vec3::new(c[6], c[7], c[8]) / 2.;
+    let ofs = SVector::from([c[6], c[7], c[8]]) / 2.;
+    // let center = -(A3_inv.dot(ofs));
+    let center = -(A3_inv * ofs);
 
-    println!("Center: {:?}", center);
+    // println!("Center: {:?}", center);
 
     // Center the ellipsoid at the origin
     // let mut tofs = Mat4::new_identity();
 
-    let Tofs = Matrix4::identity();
+    let mut Tofs = Matrix4::identity();
     // Tofs.data[12] = center.x;
     // Tofs.data[13] = center.y;
     // Tofs.data[14] = center.z;
-    Tofs[3] = [center.x, center.y, center.z];
+    Tofs.set_row(3, &RowVector4::new(center[0], center[1], center[2], 1.));
 
-    let R = tofs.dot(Amat.dot(Tofs.transpose()));
+    let R = Tofs * (Amat * &Tofs.transpose());
     // if printMe: print '\nAlgebraic form translated to center\n',R,'\n'
 
     // let rd = &R.data;
@@ -171,28 +245,53 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
     //     rd[4], rd[5], rd[6],
     //     rd[8], rd[9], rd[10]
     // ]);
+    let R3 = Matrix3::new(
+        R[(0, 0)],
+        R[(0, 1)],
+        R[(0, 2)],
+        R[(1, 0)],
+        R[(1, 1)],
+        R[(1, 2)],
+        R[(2, 0)],
+        R[(2, 1)],
+        R[(2, 2)],
+    );
 
-    let R3 = Matrix3::from_rows(&[
-        RowVector3::new(R.row[0][0], R.row[0][1], R.row[0][2]),
-        RowVector3::new(R.row[1][0], R.row[1][1], R.row[1][2]),
-        RowVector3::new(R.row[2][0], R.row[2][1], R.row[2][2]),
-    ]);
-
-    let R3_test = R3 / R3.row[0][0];
+    let R3_test = R3 / R3[(0, 0)];
     // print 'normed \n',R3test
 
-    let s1 = -R.row[3][3];
+    let s1 = -R[(3, 3)];
     let R3S = R3 / s1;
 
     let eigen = R3S.symmetric_eigen();
     let (eigen_vals, eigen_vecs) = (eigen.eigenvalues, eigen.eigenvectors);
 
-    let recip = 1.0_f32 / eigen_vals.abs();
-    let axes = recip.sqrt();
+    // let recip = 1.0_f32 / eigen_vals.abs();
+    // let recip = [
+    //     1. / eigen_vals[0].abs(),
+    //     1. / eigen_vals[1].abs(),
+    //     1. / eigen_vals[2].abs(),
+    // ];
+    let axes = Vec3::new(
+        (1. / eigen_vals[0].abs()).sqrt(),
+        (1. / eigen_vals[1].abs()).sqrt(),
+        (1. / eigen_vals[2].abs()).sqrt(),
+    );
+
+    // let axes = recip.sqrt();
     // if printMe: print '\nAxes are\n',axes  ,'\n'
 
-    let inve = eigen_vecs.inverse(); // inverse is actually the transpose here
-                                     // if printMe: print '\nRotation matrix\n',inve
+    let inve = eigen_vecs.try_inverse().unwrap(); // inverse is actually the transpose here
+                                                  // if printMe: print '\nRotation matrix\n',inve
+
+    let center = Vec3::new(center[0], center[1], center[2]);
+
+    // Our constructor is column-major. nalgebra indices are row-first.
+    let inve = Mat3::new([
+        inve[0][0], inve[1][0], inve[2][0], inve[0][1], inve[1][1], inve[2][1], inve[0][2],
+        inve[1][2], inve[2][2],
+    ]);
+
     (center, axes, inve)
 }
 
@@ -232,3 +331,7 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
 //     println!("\nAverage Radius  %10.4f (truth is 1.0)" % (np.mean(rm)));
 //     println!("Stdev of Radius %10.4f\n " % (np.std(rm)));
 // }
+
+// Per axis. Setting this too high will trigger too much (flash? ram?) use. You should get an error
+// on compile or launch.
+pub(crate) const MAG_CAL_DATA_LEN: usize = 100;
