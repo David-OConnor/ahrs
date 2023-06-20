@@ -241,7 +241,7 @@ impl Ahrs {
         // Fuse with mag data if available.
         match mag_data {
             Some(mut mag) => {
-                self.handle_mag(mag, heading_gyro, unsafe{ I });
+                self.handle_mag(mag, heading_gyro, unsafe { I });
             }
             None => {
                 self.recent_dh_mag_dh_gyro = None;
@@ -329,7 +329,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -339,7 +339,6 @@ impl Ahrs {
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
-
 
         // if unsafe { i } % 1000 == 0 {
         if false {
@@ -387,7 +386,6 @@ impl Ahrs {
                 "Hdg diff mag gyro: {}",
                 self.recent_dh_mag_dh_gyro.unwrap_or(69.)
             );
-
         }
     }
 
@@ -452,9 +450,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
 
         // todo: Update biases automatically for a short window after bootup.
 
@@ -475,8 +473,8 @@ impl Ahrs {
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        if unsafe { I } % 1000 == 0 {
-            // if false {
+        // if unsafe { I } % 1000 == 0 {
+        if false {
             // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
@@ -489,9 +487,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                // lin_acc_estimate.y,
-                // lin_acc_estimate.z,
-                // lin_acc_estimate.magnitude()
+                                                          // lin_acc_estimate.y,
+                                                          // lin_acc_estimate.z,
+                                                          // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -583,24 +581,21 @@ impl Ahrs {
 
         // todo: This is currently heavily-dependent on pitch! Likely due to earth ref being wrong?
         // Negative since it's a rotation below the horizon.
-        let inclination_estimate =
-            -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
+        let inclination_estimate = -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
 
         // No need to update the ratio each time.
         if i % self.config.update_ratio_mag_incl as u32 == 0 {
             if self.initialized {
                 // Weighted average of current inclination estimate with stored.
-                let incl_ratio = self.config.update_amt_mag_incl_estimate * self.dt * self.config.update_ratio_mag_incl as f32;
+                let incl_ratio = self.config.update_amt_mag_incl_estimate
+                    * self.dt
+                    * self.config.update_ratio_mag_incl as f32;
 
-                self.mag_inclination_estimate =
-                    (self.mag_inclination_estimate
-                        * (1. - incl_ratio) + inclination_estimate * incl_ratio);
-
+                self.mag_inclination_estimate = (self.mag_inclination_estimate * (1. - incl_ratio)
+                    + inclination_estimate * incl_ratio);
 
                 if i % 1000 == 0 {
-                    println!(
-                        "Estimated mag incl: {}",
-                        inclination_estimate);
+                    println!("Estimated mag incl: {}", inclination_estimate);
                 }
             } else {
                 // Take the full update on the first run.
@@ -620,10 +615,7 @@ impl Ahrs {
 
             let (x_component, y_component, z_component) = att_mag.to_axes();
 
-            println!(
-                "Estimated mag incl Cum: {}",
-                self.mag_inclination_estimate
-            );
+            println!("Estimated mag incl Cum: {}", self.mag_inclination_estimate);
 
             println!(
                 "Mag earth: x{} y{} z{}",
@@ -674,7 +666,7 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
             // self.cal.linear_acc_cum += lin_acc_estimate;
@@ -682,9 +674,10 @@ impl Ahrs {
 
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
-            self.cal.linear_acc_bias = self.cal.linear_acc_cum / self.config.alignment_duration as f32;
+            self.cal.linear_acc_bias =
+                self.cal.linear_acc_cum / self.config.alignment_duration as f32;
             println!("\n\nAlignment complete \n\n");
         }
     }
@@ -803,6 +796,9 @@ pub fn find_accel_offset(posit_offset: Vec3, gyro_readings: Vec3) -> Vec3 {
     // todo: QC these
     posit_offset.cross(rot_axis * rot_angle)
 }
+
+// todo: For mag cal, you can use acc/gyro-fused attitude to determine which mag sample points to keep,
+// todo ie to keep points evenly-spaced. Try that this evening. T
 
 /// Estimate hard and soft iron offsets from sample points
 /// todo: Run this periodically/regularly, instead of a separate mag cal procedure.

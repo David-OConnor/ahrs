@@ -13,7 +13,7 @@ use lin_alg2::f32::{Quaternion, Vec3};
 /// frame of reference.
 #[derive(Default, Clone)]
 pub struct Params {
-    posit_fused: PositFused,
+    pub posit_fused: PositFused,
     // /// Latitude in degrees; fused.
     // pub lat_e8: i64,
     // /// Longitude in degrees; fused.

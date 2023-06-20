@@ -12,9 +12,9 @@
 //! https://www.magnetic-declination.com/
 
 pub mod attitude;
+mod mag_ellipsoid_fitting;
 pub mod params;
 pub mod ppks;
-// mod mag_ellipsoid_fitting;
 
 pub use crate::{attitude::Ahrs, params::Params};
 
@@ -58,7 +58,6 @@ pub const RIGHT: Vec3 = Vec3 {
     y: 0.,
     z: 0.,
 };
-
 
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
