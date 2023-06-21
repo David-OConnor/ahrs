@@ -11,13 +11,16 @@
 
 use nalgebra as na;
 // use ndarray;
-use na::{ArrayStorage, Const, Matrix3, Matrix4, RowVector3, RowVector4, SMatrix, SVector};
+use na::{Const, Matrix3, Matrix4, RowVector4, SMatrix, SVector};
 
 use num_traits::Float;
 
-use lin_alg2::f32::{Mat3, Mat4, Vec3};
+use lin_alg2::f32::{Mat3, Vec3};
 
 use defmt::println;
+
+// todo: In addition to fitting hard and soft iron offsets from ellipsoids,
+// todo: You can use the gyro to factor into these.
 
 /// Vectors of attitudes the craft is at while taking elipsoid sample points. Make sure there
 /// are several points near each of these prior to calibrating.
@@ -63,6 +66,7 @@ pub const SAMPLE_VERTEX_ANGLE: f32 = 0.7297276562166872;
 
 // We need at least this many samples per category before calibrating.
 pub const MAG_SAMPLES_PER_CAT: usize = 10;
+pub const TOTAL_MAG_SAMPLE_PTS: usize = MAG_SAMPLES_PER_CAT * SAMPLE_VERTICES.len();
 
 /// least squares fit to a 3D-ellipsoid
 /// Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz  = 1
@@ -73,42 +77,38 @@ pub const MAG_SAMPLES_PER_CAT: usize = 10;
 /// This is in anticipation of forming a matrix with the polynomial coefficients.
 /// Those terms with factors of 2 are all off diagonal elements.  These contribute
 /// two terms when multiplied out (symmetric) so would need to be divided by two
-fn ls_ellipsoid(
-    x: &[f32; MAG_CAL_DATA_LEN],
-    y: &[f32; MAG_CAL_DATA_LEN],
-    z: &[f32; MAG_CAL_DATA_LEN],
-) -> [f32; 10] {
+pub fn ls_ellipsoid(sample_pts: &[Vec3; TOTAL_MAG_SAMPLE_PTS]) -> [f32; 10] {
     //  Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz = 1
     // np.hstack performs a loop over all samples and creates
     // a row in J for each x,y,z sample:
     // J[ix,0] = x[ix]*x[ix]
     // J[ix,1] = y[ix]*y[ix]
     // etc.
-    // let mut J = [[0.; 9]; MAG_CAL_DATA_LEN];
-    // for i in 0..MAG_CAL_DATA_LEN {
+    // let mut J = [[0.; 9]; TOTAL_MAG_SAMPLE_PTS];
+    // for i in 0..TOTAL_MAG_SAMPLE_PTS {
     //     let (xi, yi, zi) = (x[i], y[i], z[i]);
     //     J[i] = [xi * xi, yi * yi, zi * zi, xi * yi, xi * zi, yi * zi, xi, yi, zi];
     // }
 
-    // let J_storate = nalgebra::base::ArrayStorage<f32, MAG_CAL_DATA_LEN, 9>
+    // let J_storate = nalgebra::base::ArrayStorage<f32, TOTAL_MAG_SAMPLE_PTS, 9>
 
-    // let mut J = na::DMatrix::from_diagonal_elements(MAG_CAL_DATA_LEN, 9, 1.);
-    // let j_data = [0.0_f32; MAG_CAL_DATA_LEN * 9];
+    // let mut J = na::DMatrix::from_diagonal_elements(TOTAL_MAG_SAMPLE_PTS, 9, 1.);
+    // let j_data = [0.0_f32; TOTAL_MAG_SAMPLE_PTS * 9];
     // let mut J = na::MatrixView::from_slice_with_strides_generic(
     //     &j_data,
     //     9,
-    //     MAG_CAL_DATA_LEN,
+    //     TOTAL_MAG_SAMPLE_PTS,
     //     9 * 8,
-    //     MAG_CAL_DATA_LEN * 8,
+    //     TOTAL_MAG_SAMPLE_PTS * 8,
     // );
 
     // let j_storage = ArrayStorage::new(j_data);
-    // let mut J: SMatrix<f32, MAG_CAL_DATA_LEN, 9> = SMatrix::from_array_storage(j_storage);
-    //  Const<4>, Const<MAG_CAL_DATA_LEN> etc?
-    let mut J: SMatrix<f32, MAG_CAL_DATA_LEN, 9> = SMatrix::zeros();
+    // let mut J: SMatrix<f32, TOTAL_MAG_SAMPLE_PTS, 9> = SMatrix::from_array_storage(j_storage);
+    //  Const<4>, Const<TOTAL_MAG_SAMPLE_PTS> etc?
+    let mut J: SMatrix<f32, { TOTAL_MAG_SAMPLE_PTS }, 9> = SMatrix::zeros();
 
-    for i in 0..MAG_CAL_DATA_LEN {
-        let (xi, yi, zi) = (x[i], y[i], z[i]);
+    for i in 0..TOTAL_MAG_SAMPLE_PTS {
+        let (xi, yi, zi) = (sample_pts[i].x, sample_pts[i].y, sample_pts[i].z);
         J.set_row(
             i,
             &na::RowSVector::from([
@@ -126,8 +126,8 @@ fn ls_ellipsoid(
     }
 
     // column of ones
-    let K: SVector<f32, MAG_CAL_DATA_LEN> = SVector::from([1.; MAG_CAL_DATA_LEN]);
-    // let K = [1.; MAG_CAL_DATA_LEN];
+    let K: SVector<f32, { TOTAL_MAG_SAMPLE_PTS }> = SVector::from([1.; TOTAL_MAG_SAMPLE_PTS]);
+    // let K = [1.; TOTAL_MAG_SAMPLE_PTS];
 
     let JT = J.transpose();
     let JTJ = JT * J;
@@ -157,7 +157,7 @@ fn ls_ellipsoid(
 /// returns (center, axes, rotation matrix)
 ///
 /// Algebraic form: X.T * Amat * X --> polynomial form
-fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
+pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
     // #[rustfmt::skip]
     // let amat = Mat4::new([
     //     vec[0], vec[3]/2., vec[4]/2., vec[6]/2.,
@@ -287,10 +287,12 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
     let center = Vec3::new(center[0], center[1], center[2]);
 
     // Our constructor is column-major. nalgebra indices are row-first.
-    let inve = Mat3::new([
-        inve[0][0], inve[1][0], inve[2][0], inve[0][1], inve[1][1], inve[2][1], inve[0][2],
-        inve[1][2], inve[2][2],
-    ]);
+    // let inve = Mat3::new([
+    //     inve[0][0], inve[1][0], inve[2][0], inve[0][1], inve[1][1], inve[2][1], inve[0][2],
+    //     inve[1][2], inve[2][2],
+    // ]);
+    //
+    let inve = Mat3::new_identity(); // todo temp; above not working yet
 
     (center, axes, inve)
 }
@@ -331,7 +333,3 @@ fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Vec3, Mat3) {
 //     println!("\nAverage Radius  %10.4f (truth is 1.0)" % (np.mean(rm)));
 //     println!("Stdev of Radius %10.4f\n " % (np.std(rm)));
 // }
-
-// Per axis. Setting this too high will trigger too much (flash? ram?) use. You should get an error
-// on compile or launch.
-pub(crate) const MAG_CAL_DATA_LEN: usize = 100;

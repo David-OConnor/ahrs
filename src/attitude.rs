@@ -22,7 +22,7 @@ use crate::{FORWARD, G, RIGHT, UP};
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
 
 use crate::mag_ellipsoid_fitting::{
-    MAG_CAL_DATA_LEN, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES,
+    self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
 };
 
 use defmt::{println, write};
@@ -70,6 +70,11 @@ pub struct AhrsConfig {
     pub update_amt_mag_incl_estimate: f32,
     /// Update the mag incl estimate at this ratio of overall updates.
     pub update_ratio_mag_incl: u16,
+    /// Log a mag cal point (or skip logging if that sector already has enough data) every this
+    /// many updates. Setting too high may have performance consequences (although probably not a factor),
+    /// and cause sector categories to fill with points close to each other. Setting too low many
+    /// cause delayed calibration.
+    pub update_ratio_mag_cal_log: u16,
 }
 
 impl Default for AhrsConfig {
@@ -89,6 +94,7 @@ impl Default for AhrsConfig {
             mag_cal_timestep: 0.05,
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
+            update_ratio_mag_cal_log: 50,
         }
     }
 }
@@ -120,12 +126,10 @@ impl Default for AhrsCal {
             linear_acc_bias: Vec3::new_zero(),
             // hard_iron: Vec3::new_zero(),
             // Rough, from GPS mag can.
-            // hard_iron: Vec3::new(0.15, -0.05, -0.2),
-            // hard_iron: Vec3::new(0.10, 0.15, -0.4),
-            hard_iron: Vec3::new(-0.05, 0.16, -0.2),
+            hard_iron: Vec3::new(0.15, -0.15, -0.2),
             soft_iron: Mat3::new_identity(),
             // mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
-            mag_cal_data: [[0.; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
+            mag_cal_data: [[Vec3::new_zero(); MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
             mag_sample_i: Default::default(),
             // mag_cal_state: Default::default(),
         }
@@ -160,6 +164,10 @@ impl AhrsCal {
     /// at ~evenly-spaced attitudes, despite attitudes not being distributed evenly over time.
     /// This collects readings, then performs calibration once enough are taken in each category.
     pub fn log_mag_cal_pt(&mut self, att: Quaternion, mag_raw: Vec3) {
+        if mag_raw == Vec3::new_zero() {
+            return; // todo: Not sure why we occasionally (and at start) get this.
+        }
+
         // Indexed by the sample vec vertices.
         let mut sample_category = 0;
         for (cat, sample) in SAMPLE_VERTICES.iter().enumerate() {
@@ -171,11 +179,54 @@ impl AhrsCal {
             }
         }
 
+        // todo: More sophisticated behavior; ie time out old readings eventually.
+        if self.mag_sample_i[sample_category] == MAG_SAMPLES_PER_CAT - 1 {
+            return;
+        }
+
+        let mut num_pts_left = 0;
+        for cat in self.mag_sample_i {
+            num_pts_left += MAG_SAMPLES_PER_CAT - (cat + 1);
+        }
+        println!("Logging mag pt. Num left: {}", num_pts_left);
+
         unsafe {
             self.mag_cal_data[sample_category][self.mag_sample_i[sample_category]] = mag_raw;
             self.mag_sample_i[sample_category] =
                 (self.mag_sample_i[sample_category] + 1) % MAG_SAMPLES_PER_CAT;
         }
+    }
+
+    /// Update mag calibration based on sample points.
+    /// Only run this when there is recent data of each attitude category of points.
+    pub fn update_mag_cal(&mut self) {
+        // Flatten our sample data organized by points; that format is only used to ensure a
+        // good selection of points, ie fairly weighted on all sides.
+        let mut sample_pts = [Vec3::new_zero(); TOTAL_MAG_SAMPLE_PTS];
+
+        let mut i = 0;
+        println!("\n\n\n[");
+        for cat in self.mag_cal_data {
+            for point in cat {
+                sample_pts[i] = point;
+                println!("({}, {}, {}),", point.x, point.y, point.z);
+                i += 1;
+            }
+        }
+        println!("]");
+
+        // todo: Put back once working.
+
+        // let poly_terms = mag_ellipsoid_fitting::ls_ellipsoid(&sample_pts);
+        // let (center, axes, inve) = mag_ellipsoid_fitting::poly_to_params_3d(&poly_terms);
+        //
+        // // todo: axes and inve; what are they? Check the web page.
+        // self.hard_iron = center;
+        // self.soft_iron = inve;
+
+        // Reset our sample data.
+        self.mag_cal_data = Default::default();
+        self.mag_sample_i = Default::default();
     }
 }
 
@@ -540,7 +591,7 @@ impl Ahrs {
         // (update_gyro_from_acc, lin_acc_estimate)
     }
 
-    fn handle_mag(&mut self, mut mag: Vec3, heading_gyro: f32, i: u32) {
+    fn handle_mag(&mut self, mut mag_raw: Vec3, heading_gyro: f32, i: u32) {
         // // todo: Is this where we want this?
         // if self.mag_cal_in_progress {
         //     // self.cal.mag_cal_state.log_hard_iron(mag);
@@ -549,7 +600,7 @@ impl Ahrs {
         //     let mut mag = self.cal.apply_mag_cal(mag);
         // }
         //
-        let mut mag = self.cal.apply_mag_cal(mag);
+        let mut mag = self.cal.apply_mag_cal(mag_raw);
 
         const EPS: f32 = 0.0000001;
         if mag.x.abs() < EPS && mag.y.abs() < EPS && mag.z.abs() < EPS {
@@ -664,6 +715,22 @@ impl Ahrs {
             );
 
             println!("Heading mag: {}", heading_mag);
+        }
+
+        if i % self.config.update_ratio_mag_cal_log as u32 == 0 {
+            self.cal.log_mag_cal_pt(self.attitude, mag_raw);
+
+            // todo: Rework this into something more sophisticated
+
+            let mut ready_to_cal = true;
+            for cat in self.cal.mag_sample_i {
+                if cat != MAG_SAMPLES_PER_CAT - 1 {
+                    ready_to_cal = false;
+                }
+            }
+            if ready_to_cal {
+                self.cal.update_mag_cal();
+            }
         }
 
         // static mut MAG_CAL_PRINTED: bool = false;
