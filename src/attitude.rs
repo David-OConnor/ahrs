@@ -110,10 +110,12 @@ pub struct AhrsCal {
     pub linear_acc_bias: Vec3,
     pub hard_iron: Vec3,
     pub soft_iron: Mat3,
-    // todo: Remove the Quaternion if you don't need it, to save space.
-    // pub mag_cal_data: [(Quaternion, Vec3); MAG_CAL_DATA_LEN],
+    /// Magenetometer cal data, per attitude category.
     pub mag_cal_data: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
+    /// Current mag sample index, per attitude category.
     mag_sample_i: [usize; SAMPLE_VERTICES.len()],
+    /// Number of samples taken since last calibration, per attitude category.
+    mag_sample_count: [u8; SAMPLE_VERTICES.len()],
     // mag_cal_state: MagCalState,
 }
 
@@ -126,11 +128,11 @@ impl Default for AhrsCal {
             linear_acc_bias: Vec3::new_zero(),
             // hard_iron: Vec3::new_zero(),
             // Rough, from GPS mag can.
-            hard_iron: Vec3::new(0.15, -0.15, -0.2),
+            hard_iron: Vec3::new_zero(),
             soft_iron: Mat3::new_identity(),
-            // mag_cal_data: [Default::default(); MAG_CAL_DATA_LEN],
             mag_cal_data: [[Vec3::new_zero(); MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
             mag_sample_i: Default::default(),
+            mag_sample_count: Default::default(),
             // mag_cal_state: Default::default(),
         }
     }
@@ -178,23 +180,22 @@ impl AhrsCal {
                 break;
             }
         }
+        self.mag_cal_data[sample_category][self.mag_sample_i[sample_category]] = mag_raw;
 
-        // todo: More sophisticated behavior; ie time out old readings eventually.
-        if self.mag_sample_i[sample_category] == MAG_SAMPLES_PER_CAT - 1 {
-            return;
+        // This loops around; we always update the oldest value in each category
+        self.mag_sample_i[sample_category] =
+            (self.mag_sample_i[sample_category] + 1) % MAG_SAMPLES_PER_CAT;
+
+        if self.mag_sample_count[sample_category] < MAG_SAMPLES_PER_CAT as u8 {
+            self.mag_sample_count[sample_category] += 1;
         }
 
+        // To display status.
         let mut num_pts_left = 0;
-        for cat in self.mag_sample_i {
-            num_pts_left += MAG_SAMPLES_PER_CAT - (cat + 1);
+        for cat in self.mag_sample_count {
+            num_pts_left += MAG_SAMPLES_PER_CAT as u8 - cat;
         }
         println!("Logging mag pt. Num left: {}", num_pts_left);
-
-        unsafe {
-            self.mag_cal_data[sample_category][self.mag_sample_i[sample_category]] = mag_raw;
-            self.mag_sample_i[sample_category] =
-                (self.mag_sample_i[sample_category] + 1) % MAG_SAMPLES_PER_CAT;
-        }
     }
 
     /// Update mag calibration based on sample points.
@@ -227,6 +228,7 @@ impl AhrsCal {
         // Reset our sample data.
         self.mag_cal_data = Default::default();
         self.mag_sample_i = Default::default();
+        self.mag_sample_count = Default::default();
     }
 }
 
@@ -408,7 +410,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -529,9 +531,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
+        // todo: Be careful about floating point errors over time.
+        // todo: Toss extreme values?
+        // todo: Lowpass?
 
         // todo: Update biases automatically for a short window after bootup.
 
@@ -566,9 +568,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                                                          // lin_acc_estimate.y,
-                                                          // lin_acc_estimate.z,
-                                                          // lin_acc_estimate.magnitude()
+                // lin_acc_estimate.y,
+                // lin_acc_estimate.z,
+                // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -723,8 +725,8 @@ impl Ahrs {
             // todo: Rework this into something more sophisticated
 
             let mut ready_to_cal = true;
-            for cat in self.cal.mag_sample_i {
-                if cat != MAG_SAMPLES_PER_CAT - 1 {
+            for cat_count in self.cal.mag_sample_count {
+                if cat_count != MAG_SAMPLES_PER_CAT as u8 {
                     ready_to_cal = false;
                 }
             }
@@ -763,7 +765,7 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
             // self.cal.linear_acc_cum += lin_acc_estimate;
@@ -771,7 +773,7 @@ impl Ahrs {
 
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
