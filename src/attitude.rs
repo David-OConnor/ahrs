@@ -15,7 +15,7 @@ use core::{
 
 use num_traits::float::Float; // abs etc
 
-use lin_alg2::f32::{Mat3, Mat4, Quaternion, Vec3};
+use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 
 use crate::{FORWARD, G, RIGHT, UP};
 
@@ -153,13 +153,13 @@ impl AhrsCal {
         self.soft_iron.clone() * (mag_data - self.hard_iron)
     }
 
-    /// Estimate hard iron offset from the filled data buffer.
-    /// todo: How should we do this? Best-fit ellipse, then find its center?
-    /// todo: To keep your buffers from running you out of flash, consider a few independent estimates,
-    /// todo then averaging (etc) them.
-    pub fn estimate_hard_iron(&mut self) {
-        // self.hard_iron =
-    }
+    // /// Estimate hard iron offset from the filled data buffer.
+    // /// todo: How should we do this? Best-fit ellipse, then find its center?
+    // /// todo: To keep your buffers from running you out of flash, consider a few independent estimates,
+    // /// todo then averaging (etc) them.
+    // pub fn estimate_hard_iron(&mut self) {
+    //     // self.hard_iron =
+    // }
 
     /// Run this once every x updates.
     /// Stores a calibration point into a directional category. The aim is to evenly mix samples taked
@@ -174,6 +174,10 @@ impl AhrsCal {
         let mut sample_category = 0;
         for (cat, sample) in SAMPLE_VERTICES.iter().enumerate() {
             // `UP` is arbitrary; any Vec will do as long as we're consistent.
+
+            // todo: This still leaves you with an ambiguity for teh Z readings. You might need 2
+            // todo categories of different rotation axes.
+
             let up_rotated = att.rotate_vec(UP);
             if (up_rotated.dot(*sample)).acos() < SAMPLE_VERTEX_ANGLE {
                 sample_category = cat;
@@ -191,11 +195,11 @@ impl AhrsCal {
         }
 
         // To display status.
-        let mut num_pts_left = 0;
-        for cat in self.mag_sample_count {
-            num_pts_left += MAG_SAMPLES_PER_CAT as u8 - cat;
-        }
-        println!("Logging mag pt. Num left: {}", num_pts_left);
+        // let mut num_pts_left = 0;
+        // for cat in self.mag_sample_count {
+        //     num_pts_left += MAG_SAMPLES_PER_CAT as u8 - cat;
+        // }
+        // println!("Logging mag pt. Num left: {}", num_pts_left);
     }
 
     /// Update mag calibration based on sample points.
@@ -219,8 +223,7 @@ impl AhrsCal {
         // todo: Put back once working.
 
         // let poly_terms = mag_ellipsoid_fitting::ls_ellipsoid(&sample_pts);
-        // let (center, axes, inve) = mag_ellipsoid_fitting::poly_to_params_3d(&poly_terms);
-        //
+        // let (hard_iron, soft_iron) = mag_ellipsoid_fitting::poly_to_params_3d(&poly_terms);
         // // todo: axes and inve; what are they? Check the web page.
         // self.hard_iron = center;
         // self.soft_iron = inve;
@@ -410,7 +413,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -531,9 +534,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
 
         // todo: Update biases automatically for a short window after bootup.
 
@@ -545,7 +548,6 @@ impl Ahrs {
             // We guess no linear acc since we're getting close to 1G. Note that
             // this will produce false positives in some cases.
             update_gyro_from_acc = true;
-            // } else if lin_acc_estimate_bias_removed.magnitude() < lin_acc_thresh {
         } else if lin_acc_estimate_bias_removed.magnitude() < self.config.lin_acc_thresh {
             // If not under much acceleration, re-cage our attitude.
             update_gyro_from_acc = true;
@@ -568,9 +570,9 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
                 lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                // lin_acc_estimate.y,
-                // lin_acc_estimate.z,
-                // lin_acc_estimate.magnitude()
+                                                          // lin_acc_estimate.y,
+                                                          // lin_acc_estimate.z,
+                                                          // lin_acc_estimate.magnitude()
             );
 
             // println!(
@@ -630,7 +632,7 @@ impl Ahrs {
         // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
         // todo under linear accel.
         // let heading_mag = heading_from_mag(mag_norm, att_acc);
-        let heading_mag = heading_from_mag(mag_earth_ref);
+        let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
         // let heading_mag = heading_from_att(att_mag);
 
         // Assess magnetometer health by its comparison in rate change compared to the gyro.
@@ -765,15 +767,16 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
             // self.cal.linear_acc_cum += lin_acc_estimate;
         }
 
+        // todo: Rework this.
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
@@ -810,7 +813,7 @@ pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
 
 /// Calculate heading, in radians, from the magnetometer's X and Y axes.
 // pub fn heading_from_mag(mag_norm: Vec3, att_without_heading: Quaternion) -> f32 {
-pub fn heading_from_mag(mag_earth_ref: Vec3) -> f32 {
+pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
     // todo: Pass in earth ref instead of recomputing earth ref here.
     // // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
     //
@@ -818,16 +821,17 @@ pub fn heading_from_mag(mag_earth_ref: Vec3) -> f32 {
     // let mag_earth_ref = att_without_heading.inverse().rotate_vec(mag_norm);
     // let mag_earth_ref = att_without_heading.rotate_vec(mag_norm);
 
-    // TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)
+    let mag_heading = (3. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
+    mag_heading + declination
 
-    // TAU / 4. - mag_norm.x.atan2(mag_norm.y)
+    // return TAU / 4. - mag_norm.x.atan2(mag_norm.y);
 
-    let mag_on_horizontal_plane = mag_earth_ref.project_to_plane(UP);
-    let rot_to_fwd = Quaternion::from_unit_vecs(mag_on_horizontal_plane, FORWARD);
-    rot_to_fwd.angle()
+    // let mag_on_horizontal_plane = mag_earth_ref.project_to_plane(UP);
+    // let rot_to_fwd = Quaternion::from_unit_vecs(mag_on_horizontal_plane, FORWARD);
+    // rot_to_fwd.angle()
 
-    // // From Honeywell guide
-    // // todo: Is this equiv to atan2?
+    // From Honeywell guide
+    // todo: Is this equiv to atan2?
     // if mag_earth_ref.y > 0. {
     //     TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
     // } else {
