@@ -22,10 +22,6 @@ use chrono::NaiveDateTime;
 use lin_alg2::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
 
-// todo: Try this : https://github.com/Mayitzin/ahrs/blob/master/ahrs/filters/ekf.py
-
-// use defmt::println;
-
 // C file with impl of EKF for quaternion rotation:
 // https://github.com/pms67/EKF-Quaternion-Attitude-Estimation/blob/master/EKF.h
 // https://github.com/pms67/EKF-Quaternion-Attitude-Estimation/blob/master/updateEKFQuatAtt.m
@@ -87,14 +83,10 @@ pub struct Fix {
     pub timestamp_s: f32,
     pub datetime: NaiveDateTime,
     pub type_: FixType,
-    // /// Degrees
-    // pub lat: f64,
-    // /// Degrees
-    // pub lon: f64,
     /// Degrees x 1e7
-    pub lat: i32,
+    pub lat_e7: i32,
     /// Degrees x 1e7
-    pub lon: i32,
+    pub lon_e7: i32,
     /// mm
     pub elevation_hae: i32,
     /// mm

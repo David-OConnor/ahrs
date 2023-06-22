@@ -40,53 +40,48 @@ pub struct PositFused {
 }
 
 impl PositFused {
-    /// `fix` is the most-recently-received fix. `attitude` and `position_inertial` are the most recent ones
-    /// as well.
-    ///
-    /// todo: We need to update position_inertial when we get a new fix, taking some or all
-    /// todo of the fix.
+    /// Fuse dead-reckoning position and velocity from the most-recent fix with inertial
+    /// position and velocity.
+    /// `fix` is the most-recently-received fix.
     pub fn new(
+        // todo: fix here vs inertial's anchor? Likely the same.
         fix: &Fix,
         inertial: &mut PositInertial,
-        params: &Params,
-        dt: f32,
         timestamp: f32,
     ) -> Self {
         let gnss_dr = PositVelEarthUnits::from_fix_dr(fix, timestamp);
 
-        inertial.update(params, dt);
-
-        // We use separate (vice a single float) weight since we also need to apply it to integers.
-        let weight_gnss = 3;
-        let weight_imu = 10 - weight_gnss;
-        let weight_gnss_float = weight_gnss as f32 / 10.;
-        let weight_imu_float = 1. - weight_gnss_float;
-
         // todo: If dt since last fix is longer, weigh INS more.
 
-        let inertial_earth = inertial.get_earth_units();
+        let inertial_absolute = inertial.combine_with_anchor();
 
-        let ned_velocity = [
-            (fix.ned_velocity[0] as f32 / 1_000.) + inertial.v_y,
-            (fix.ned_velocity[1] as f32 / 1_000.) + inertial.v_x,
-            (fix.ned_velocity[2] as f32 / 1_000.) + inertial.v_z,
-        ];
+        // For this reference, we update gnss DR with our inertial position and velocity
+        let update_amount: f32 = 0.5;
 
-        let elevation_msl = gnss_dr.elevation_msl * weight_gnss_float
-            + inertial_earth.elevation_msl * weight_imu_float;
+        let add_to_gnss = PositVelEarthUnits {
+            // todo: This /2 is a rough proxy for update amount on fixed-point.
+            lat_e8: (inertial_absolute.lat_e8 - gnss_dr.lat_e8) / 2,
+            lon_e8: (inertial_absolute.lon_e8 - gnss_dr.lon_e8) / 2,
+            elevation_msl: (inertial_absolute.elevation_msl - gnss_dr.elevation_msl)
+                * update_amount,
+            velocity: (inertial_absolute.velocity - gnss_dr.velocity) * update_amount,
+        };
+
+        let vel = gnss_dr.velocity + add_to_gnss.velocity;
+
+        let elevation_msl = gnss_dr.elevation_msl + add_to_gnss.elevation_msl;
 
         // todo: Qc
         let elevation_hae = (fix.elevation_hae as f32 / 1_000.)
-            - (fix.elevation_msl - fix.elevation_hae) as f32 / 1_000.;
+            + (elevation_msl - (fix.elevation_msl as f32 / 1_000.));
 
         Self {
-            // todo: Inertial is in mm I think. Maybe have it return lat/lon instead.
             timestamp_us: (timestamp * 1_000_000.) as u64,
-            lon_e8: (gnss_dr.lon_e8 * weight_gnss + inertial_earth.lon_e8 * weight_imu) / 10,
-            lat_e8: (gnss_dr.lat_e8 * weight_gnss + inertial_earth.lat_e8 * weight_imu) / 10,
+            lon_e8: gnss_dr.lon_e8 + add_to_gnss.lon_e8,
+            lat_e8: gnss_dr.lat_e8 + add_to_gnss.lat_e8,
             elevation_msl,
             elevation_hae,
-            ned_velocity,
+            ned_velocity: [vel.x, vel.y, vel.z],
         }
     }
 
@@ -131,7 +126,8 @@ impl PositInertial {
     /// We fuse with GNSS and baro elsewhere.
     pub fn update(
         &mut self,
-        params: &Params,
+        acc_lin: Vec3,
+        attitude: Quaternion,
         dt: f32, // seconds
     ) {
         // todo: temp hard Hard-codefor testing.
@@ -142,39 +138,8 @@ impl PositInertial {
             velocity: Vec3::new(0., 1., 0.),
         };
 
-        // todo: Using this to experiment with new att platform
-        let accel_data = Vec3 {
-            x: params.a_x,
-            y: params.a_y, // negative due to our IMU's coord system.
-            z: params.a_z,
-        };
-
-        let gyro_data = Vec3 {
-            x: params.v_pitch,
-            y: params.v_roll,
-            z: params.v_yaw,
-        };
-        let mag_data = Vec3 {
-            x: params.mag_x, // negative due to our mag's coord systeparams.mag_.
-            y: params.mag_y,
-            z: params.mag_z,
-        };
-
-        // println!("Accel mag: {}", accel_vec.magnitude());
-        // println!("Magnetic mag: {}", mag_vec.magnitude());
-
-        // let accel_mag = 10.084;
-        // let mag_mag = 1.0722; // gauss
-        // let local_mag_str = 0.47;
-
-        // accel_data *= crate::G / accel_mag;
-        // mag_data *= local_mag_str / mag_mag;
-
-        // let accel_lin = crate::attitude::get_linear_accel(accel_data, att_accel);
-        let accel_lin = params.accel_linear;
-
         self.posit += self.velocity * dt;
-        self.velocity += accel_lin * dt;
+        self.velocity += attitude.inverse().rotate_vec(acc_lin) * dt;
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
@@ -182,7 +147,23 @@ impl PositInertial {
         if unsafe { I } % 2000 == 0 {
             println!(
                 "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
-                self.x, self.y, self.z, self.v_x, self.v_y, self.v_z
+                self.posit.x,
+                self.posit.y,
+                self.posit.z,
+                self.velocity.x,
+                self.velocity.y,
+                self.velocity.z
+            );
+
+            let combined = self.combine_with_anchor();
+            println!(
+                "Combined: lat{} lon{} msl{} -- vx{} vy{} vz{}",
+                combined.lat_e8,
+                combined.lon_e8,
+                combined.elevation_msl,
+                combined.velocity.x,
+                combined.velocity.y,
+                combined.velocity.z
             );
         }
     }
@@ -190,30 +171,38 @@ impl PositInertial {
     /// Update the anchor point, based on a new fix.
     pub fn update_anchor(&mut self, fix: &Fix) {
         // todo: For now, we accept the whole fix. In the future, weight with our inertial position.
-        let diff = ned_vel_to_xyz(fix.ned_velocity) - self.velocity;
-
-        // let update_factor = 0.8; // 1.0 means replace the anchor entirely.
-        let update_factor = 1.; // 1.0 means replace the anchor entirely.
-        let velocity = self.velocity + diff * update_factor;
+        // let diff = ned_vel_to_xyz(fix.ned_velocity) - self.velocity;
+        //
+        // // let update_factor = 0.8; // 1.0 means replace the anchor entirely.
+        // let update_factor = 1.; // 1.0 means replace the anchor entirely.
 
         self.anchor = PositVelEarthUnits {
-            lat_e8: fix.lat as i64 * 10,
-            lon_e8: fix.lon as i64 * 10,
+            lat_e8: fix.lat_e7 as i64 * 10,
+            lon_e8: fix.lon_e7 as i64 * 10,
             elevation_msl: fix.elevation_msl as f32 / 1_000.,
-            velocity,
+            velocity: ned_vel_to_xyz(fix.ned_velocity),
         };
+
+        // For now, completely sync to anchor by resetting our relative position and velocity.
+        // todo: In the future, don't do this
+        self.posit = Vec3::new_zero();
+        self.velocity = Vec3::new_zero();
     }
 
-    pub fn get_earth_units(&self) -> PositVelEarthUnits {
-        let (lat, lon) = augment_latlon(self.anchor.lat_e8, self.anchor.lon_e8, self.y, self.x);
-
-        let velocity = self.anchor.velocity + self.velocity;
+    /// Combine the relative units stored by this struct's position and velocity with its anchor.
+    pub fn combine_with_anchor(&self) -> PositVelEarthUnits {
+        let (lat, lon) = augment_latlon(
+            self.anchor.lat_e8,
+            self.anchor.lon_e8,
+            self.posit.y,
+            self.posit.x,
+        );
 
         PositVelEarthUnits {
             lat_e8: lat,
             lon_e8: lon,
-            elevation_msl: self.anchor.elevation_msl / 1_000. + self.z,
-            velocity,
+            elevation_msl: self.anchor.elevation_msl + self.posit.z,
+            velocity: self.anchor.velocity + self.velocity,
         }
     }
 }
@@ -230,27 +219,27 @@ pub struct PositVelEarthUnits {
 }
 
 impl PositVelEarthUnits {
-    /// Apply dead-reckoning to the most recent GNSS fix. This is what we fuse with inertial data.
+    /// Apply dead-reckoning to the most recent GNSS fix.
     /// Returns a result with lat, lon, and alt as f32.
     /// time is in seconds.
     /// Returns lat, lon (both 1e7), and alt in mm.
     pub fn from_fix_dr(fix: &Fix, timestamp_s: f32) -> Self {
         let dt = timestamp_s - fix.timestamp_s;
 
-        // These are in mm/s
-        let [v_north, v_east, v_down] = fix.ned_velocity;
+        let velocity = ned_vel_to_xyz(fix.ned_velocity);
 
-        let (lat, lon) = augment_latlon(
-            (fix.lat as i64) * 10,
-            (fix.lon as i64) * 10,
-            v_north as f32 * dt / 1_000.,
-            v_east as f32 * dt / 1_000.,
+        let (lat_e8, lon_e8) = augment_latlon(
+            (fix.lat_e7 as i64) * 10,
+            (fix.lon_e7 as i64) * 10,
+            velocity.y * dt,
+            velocity.x * dt,
         );
 
         Self {
-            lat_e8: lat,
-            lon_e8: lon,
-            elevation_msl: (fix.elevation_msl as f32 / 1_000.) - (v_down as f32 * dt / 1_000.),
+            lat_e8,
+            lon_e8,
+            elevation_msl: (fix.elevation_msl as f32 / 1_000.) + velocity.z * dt,
+            velocity,
         }
     }
 }

@@ -33,6 +33,7 @@ pub struct Params {
     pub attitude: Quaternion,
     // todo: AHRS quaternion field, or leave that as part of the `AHRS` struct?
     pub accel_linear: Vec3,
+    // todo: Vec3 for these?
 
     // Velocity
     pub v_x: f32,
@@ -51,10 +52,8 @@ pub struct Params {
     pub a_pitch: f32,
     pub a_roll: f32,
     pub a_yaw: f32,
-
-    pub mag_x: f32,
-    pub mag_y: f32,
-    pub mag_z: f32,
+    //
+    // pub mag_data: Option<Vec3>,
 }
 
 impl Params {
@@ -102,10 +101,6 @@ impl Params {
 
         self.accel_linear = ahrs.linear_acc_estimate;
 
-        if let Some(mag) = mag_data {
-            self.mag_x = mag.x;
-            self.mag_y = mag.y;
-            self.mag_z = mag.z;
-        }
+        // self.mag_data = mag_data;
     }
 }
