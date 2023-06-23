@@ -89,8 +89,8 @@ impl Default for AhrsConfig {
             total_accel_thresh: 0.2, // m/s^2
             lin_acc_thresh: 0.4,     // m/s^2
             // calibration: Default::default(),
-            start_alignment_time: 2,
-            alignment_duration: 2,
+            start_alignment_time: 3,
+            alignment_duration: 3,
             mag_cal_timestep: 0.05,
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
@@ -116,6 +116,10 @@ pub struct AhrsCal {
     mag_sample_i: [usize; SAMPLE_VERTICES.len()],
     /// Number of samples taken since last calibration, per attitude category.
     mag_sample_count: [u8; SAMPLE_VERTICES.len()],
+    /// In m/s^2. Used for determining linear acceleration. This should be close to G.
+    acc_len_at_rest: f32,
+    /// Used when aligning.
+    acc_len_cum: f32,
     // mag_cal_state: MagCalState,
 }
 
@@ -133,6 +137,8 @@ impl Default for AhrsCal {
             mag_cal_data: [[Vec3::new_zero(); MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
             mag_sample_i: Default::default(),
             mag_sample_count: Default::default(),
+            acc_len_cum: 0.,
+            acc_len_at_rest: G,
             // mag_cal_state: Default::default(),
         }
     }
@@ -195,11 +201,13 @@ impl AhrsCal {
         }
 
         // To display status.
-        // let mut num_pts_left = 0;
-        // for cat in self.mag_sample_count {
-        //     num_pts_left += MAG_SAMPLES_PER_CAT as u8 - cat;
-        // }
-        // println!("Logging mag pt. Num left: {}", num_pts_left);
+        if false {
+            let mut num_pts_left = 0;
+            for cat in self.mag_sample_count {
+                num_pts_left += MAG_SAMPLES_PER_CAT as u8 - cat;
+            }
+            println!("Logging mag pt. Num left: {}", num_pts_left);
+        }
     }
 
     /// Update mag calibration based on sample points.
@@ -222,11 +230,17 @@ impl AhrsCal {
 
         // todo: Put back once working.
 
-        // let poly_terms = mag_ellipsoid_fitting::ls_ellipsoid(&sample_pts);
-        // let (hard_iron, soft_iron) = mag_ellipsoid_fitting::poly_to_params_3d(&poly_terms);
+        let poly_terms = mag_ellipsoid_fitting::ls_ellipsoid(&sample_pts);
+        let (hard_iron, soft_iron) = mag_ellipsoid_fitting::poly_to_params_3d(&poly_terms);
         // // todo: axes and inve; what are they? Check the web page.
         // self.hard_iron = center;
         // self.soft_iron = inve;
+
+        println!("Hard iron: x{} y{} z{}", hard_iron.x, hard_iron.y, hard_iron.z);
+
+        println!("Soft iron diag: {} {} {} {} {} {}",
+                 soft_iron.data[0], soft_iron.data[1], soft_iron.data[2], soft_iron.data[4],
+                 soft_iron.data[5], soft_iron.data[8]);
 
         // Reset our sample data.
         self.mag_cal_data = Default::default();
@@ -424,8 +438,8 @@ impl Ahrs {
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        // if unsafe { i } % 1000 == 0 {
-        if false {
+        if unsafe { I } % 1000 == 0 {
+        // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             let euler = self.attitude.to_euler();
@@ -458,13 +472,11 @@ impl Ahrs {
             // );
 
             // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
-            println!("Acc: x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
-
-            println!("Acclen: {}", accel_data.magnitude());
+            println!("Acc: x{} y{} z{} mag{}", accel_data.x, accel_data.y, accel_data.z, accel_data.magnitude());
 
             println!("\nHeading fused: {:?}\n", heading_fused);
 
-            println!("Heading gyro: {}", heading_gyro);
+            // println!("Heading gyro: {}", heading_gyro);
 
             println!(
                 "Hdg diff mag gyro: {}",
@@ -523,14 +535,16 @@ impl Ahrs {
         // For this, we postulate that the gyro's attitude is correct, and therefore the force
         // for gravity is that axis's *up* vector, multiplied by G. The difference between the accelerometer
         // readings and this, therefore is linear acceleration.
+        // This linear acc estimate is in earth coords.
 
         // acc = lin + grav
         // lin = acc - (grav_axis_gyro * G)
         // For the purpose of this calculation, we are assuming the real gravitation axis is
         // that determined by the gyro.
-        let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * G);
+        // This is in the aircraft's frame of reference.
+        let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * self.cal.acc_len_at_rest);
 
-        self.align(lin_acc_estimate);
+        self.align(lin_acc_estimate, accel_data);
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
@@ -556,8 +570,8 @@ impl Ahrs {
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        // if unsafe { I } % 1000 == 0 {
-        if false {
+        if unsafe { I } % 1000 == 0 {
+        // if false {
             // println!("Ag: {}", _acc_gyro_alignment);
             println!(
                 "Lin bias: x{} y{} z{}",
@@ -569,11 +583,19 @@ impl Ahrs {
                 lin_acc_estimate_bias_removed.x,
                 lin_acc_estimate_bias_removed.y,
                 lin_acc_estimate_bias_removed.z,
-                lin_acc_estimate_bias_removed.magnitude() // lin_acc_estimate.x,
-                                                          // lin_acc_estimate.y,
-                                                          // lin_acc_estimate.z,
-                                                          // lin_acc_estimate.magnitude()
+                lin_acc_estimate_bias_removed.magnitude()
             );
+
+            // println!(
+            //     "Lin w bias: x{} y{} z{}. mag{}",
+            //     lin_acc_estimate.x,
+            //     lin_acc_estimate.y,
+            //     lin_acc_estimate.z,
+            //     lin_acc_estimate.magnitude() // lin_acc_estimate.x,
+            //                                               // lin_acc_estimate.y,
+            //                                               // lin_acc_estimate.z,
+            //                                               // lin_acc_estimate.magnitude()
+            // );
 
             // println!(
             //     "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
@@ -680,6 +702,7 @@ impl Ahrs {
                     + inclination_estimate * incl_ratio);
 
                 if i % 1000 == 0 {
+                // if false {
                     println!("Estimated mag incl: {}", inclination_estimate);
                 }
             } else {
@@ -688,8 +711,8 @@ impl Ahrs {
             }
         }
 
-        if i % 1000 == 0 {
-            // if false {
+        // if i % 1000 == 0 {
+            if false {
             println!(
                 "\n\nMag norm: x{} y{} z{} len{}",
                 mag_norm.x,
@@ -764,12 +787,16 @@ impl Ahrs {
     }
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
-    fn align(&mut self, lin_acc_estimate: Vec3) {
+    fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3,) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
                 < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
+            // Maybe this will help with bias estimates before we set it properly.
+            self.cal.acc_len_at_rest = acc_data.magnitude();
+
             self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
+            self.cal.acc_len_cum += acc_data.magnitude() * self.dt;
             // self.cal.linear_acc_cum += lin_acc_estimate;
         }
 
@@ -780,6 +807,10 @@ impl Ahrs {
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
+
+            self.cal.acc_len_at_rest =
+                self.cal.acc_len_cum / self.config.alignment_duration as f32;
+
             println!("\n\nAlignment complete \n\n");
         }
     }

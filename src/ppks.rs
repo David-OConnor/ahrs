@@ -4,6 +4,8 @@
 
 // todo: Move to ahrs module, but we need to sort out how to handle `Fix`.
 
+use core::f32::consts::TAU;
+use core::ptr::eq;
 use num_traits::Float;
 
 use lin_alg2::f32::{Quaternion, Vec3};
@@ -137,6 +139,13 @@ impl PositInertial {
             elevation_msl: 0.,
             velocity: Vec3::new(0., 1., 0.),
         };
+
+        // todO: For debugging
+        // let acc_lin = Vec3::new(
+        //     0.,
+        //     0.1,
+        //     0.
+        // );
 
         self.posit += self.velocity * dt;
         self.velocity += attitude.inverse().rotate_vec(acc_lin) * dt;
