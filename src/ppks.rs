@@ -4,13 +4,11 @@
 
 // todo: Move to ahrs module, but we need to sort out how to handle `Fix`.
 
-use core::f32::consts::TAU;
-use core::ptr::eq;
 use num_traits::Float;
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::{params::Params, Fix};
+use crate::{Fix};
 
 const FIX_FUSED_SIZE: usize = 36;
 
