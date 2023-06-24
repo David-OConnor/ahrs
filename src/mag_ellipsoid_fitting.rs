@@ -12,8 +12,8 @@
 // todo: Good approach, but you may be limited by embedded here on the matrix inverse. Maybe
 // todo loop in nalgebra
 
-use nalgebra as na;
 use na::{Const, Matrix3, Matrix4, RowVector4, SMatrix, SVector};
+use nalgebra as na;
 
 use num_traits::Float;
 
@@ -230,9 +230,15 @@ pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Mat3) {
     // M=np.dot(R.T,np.dot(L,R))
 
     let L = Matrix3::new(
-        1./axes.x, 0., 0.,
-        0., 1./axes.y, 0.,
-        0., 0., 1./axes.z
+        1. / axes.x,
+        0.,
+        0.,
+        0.,
+        1. / axes.y,
+        0.,
+        0.,
+        0.,
+        1. / axes.z,
     );
 
     let M = Rot.transpose() * (L * Rot);

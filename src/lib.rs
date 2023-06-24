@@ -22,6 +22,8 @@ use chrono::NaiveDateTime;
 use lin_alg2::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
 
+use defmt::println;
+
 // C file with impl of EKF for quaternion rotation:
 // https://github.com/pms67/EKF-Quaternion-Attitude-Estimation/blob/master/EKF.h
 // https://github.com/pms67/EKF-Quaternion-Attitude-Estimation/blob/master/updateEKFQuatAtt.m
@@ -189,4 +191,14 @@ pub fn get_attitude(
 /// Output: m/s^2, or Output: rad/s.
 pub fn interpret_accel_or_gyro(val: i16, fullscale: f32) -> f32 {
     (val as f32 / i16::MAX as f32) * fullscale
+}
+
+/// Utility function to print a quaternion by axes.
+pub fn print_quat(quat: Quaternion, name: &str) {
+    let (x_component, y_component, z_component) = quat.to_axes();
+
+    println!(
+        "{} -- x{} y{} z{}",
+        name, x_component, y_component, z_component
+    );
 }

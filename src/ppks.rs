@@ -153,7 +153,8 @@ impl PositInertial {
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        if unsafe { I } % 2000 == 0 {
+        // if unsafe { I } % 2000 == 0 {
+        if false {
             println!(
                 "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
                 self.posit.x,
