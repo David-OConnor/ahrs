@@ -44,7 +44,8 @@ pub struct AhrsConfig {
     /// gyro drift. Values from 0.1 to 10 may be optimal.
     ///
     /// This value can be thought of as the 1 / the number of seconds to correct a gyro reading to match the
-    /// accelerometer. Keep this in mind re expectations of gyro drift rate.
+    /// accelerometer. Keep this in mind re expectations of gyro drift rate. It must be high enough to
+    /// compensate for drift (but perhaps not much higher)
     pub update_from_acc_amt: f32,
     pub update_port_mag_heading: f32,
     // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
@@ -84,11 +85,11 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
-            update_from_acc_amt: 2.,
+            update_from_acc_amt: 3.,
             update_port_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
-            lin_acc_thresh: 0.4,     // m/s^2
+            lin_acc_thresh: 0.3,     // m/s^2
             // calibration: Default::default(),
             start_alignment_time: 2,
             alignment_duration: 2,
@@ -260,8 +261,8 @@ impl AhrsCal {
 }
 
 pub struct Ahrs {
-        pub config: AhrsConfig,
-        pub cal: AhrsCal,
+    pub config: AhrsConfig,
+    pub cal: AhrsCal,
     pub attitude: Quaternion,
     att_from_gyros: Quaternion,
     att_from_acc: Quaternion,
@@ -295,7 +296,7 @@ pub struct Ahrs {
 impl Ahrs {
     pub fn new(dt: f32) -> Self {
         Self {
-                config: AhrsConfig::default(),
+            config: AhrsConfig::default(),
             cal: AhrsCal::default(),
             attitude: Quaternion::new_identity(),
             att_from_gyros: Quaternion::new_identity(),
@@ -333,12 +334,6 @@ impl Ahrs {
         // todo: Remove `heading_gyro` if you end up not using it.
         self.heading_gyro = heading_gyro;
 
-        // todo: Sort these att acc w heading and gyro without ones.
-
-        // Remove the heading component from the gyroscope. This allows us to compare
-        // it to the accelerometer to estimate linear acceleration.
-        // let att_gyro_without_heading = Quaternion::from_axis_angle(UP, heading_gyro) * att_gyro;
-
         // See comment on the `initialized` field.
         // We update initialized state at the end of this function, since other steps rely on it.
         if !self.initialized {
@@ -358,13 +353,7 @@ impl Ahrs {
             }
         }
 
-        // Consider this flow: mag updates gyro heading. Att updates gyro pitch and roll.
-        // Gyro turns into fused?
-
-        // todo: Which approach: Apply heading to acc, or remove from gyro?
-        let (update_gyro_from_acc, lin_acc_estimate) =
-            // self.handle_linear_acc(accel_data,  att_gyro_without_heading);
-            self.handle_linear_acc(accel_data,  att_gyro);
+        let (update_gyro_from_acc, lin_acc_estimate) = self.handle_linear_acc(accel_data, att_gyro);
 
         let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
 
@@ -384,8 +373,8 @@ impl Ahrs {
             let rot_to_apply_to_gyro = Quaternion::new_identity()
                 .slerp(rot_gyro_to_acc, self.config.update_from_acc_amt * self.dt);
 
-            if unsafe { I } % 1000 == 0 {
-            // if false {
+            // if unsafe { I } % 1000 == 0 {
+            if false {
                 print_quat(rot_gyro_to_acc, "Rot to apply");
                 println!("rot angle: {}", rot_gyro_to_acc.angle());
             }
@@ -420,7 +409,7 @@ impl Ahrs {
             // let euler = self.attitude.to_euler();
             // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
 
-            print_quat(self.attitude, "Att fused");
+            print_quat(self.attitude, "\n\nAtt fused");
 
             print_quat(self.att_from_acc, "Att Acc");
 
@@ -433,10 +422,6 @@ impl Ahrs {
                 accel_data.z,
                 accel_data.magnitude()
             );
-
-            // todo: Temp print to make sure gyro without heading has indeed no heading, and pitch and roll
-            // todo are correct for it.
-            // print_quat(att_gyro_without_heading, "Gyro without heading");
 
             // println!("\nHeading fused: {:?}\n", heading_fused);
 
@@ -464,37 +449,18 @@ impl Ahrs {
         // // att gyro must have heading removed, or acc must have heading added.
         att_gyro: Quaternion,
     ) -> (bool, Vec3) {
-        // todo: Ways to identify linear acceleration:
+        //  Ways to identify linear acceleration:
         // - Greater or less than 1G of acceleration, if the accel is calibrated.
         // - Discontinuities or other anomolies when integrating accel-based attitude over time,
         // - or, along those lines, discontinuities etc when fusing with gyro.
-
-        // Identify the angle difference in the vector between the current attitude estimate, and that
-        // from the accelerometer alone.
 
         // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
         // the accelerometer's normalized vector when linear acceleration is 0.
         let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
 
-        // An alignment of 1 indicates the estimated up direction between the accelerometer
-        // and gyro match. A value of 0 means they're perpendicular.
-        // let _acc_gyro_alignment = accel_data.to_normalized().dot(grav_axis_from_att_gyro);
-
-        // Compute the difference, as a quaternion, between the attitude calulated from the accelerometer,
-        // and the attitude calculated from the gyroscope. A notable difference implies linear acceleration.
-        // todo: We are currently not using these
-        // let angle_diff_acc_gyro = diff_acc_gyro.angle();
-
         // Estimate linear acceleration by comparing the accelerometer's normalized vector (indicating the
         // direction it resists gravity) with that estimated from the gyro. This is a proxy for linear
         // acceleration.
-
-        // Some properties this should have:
-        // -- If the grav vecs are aligned, we should see a linear accel along it: the accel's value - G * Z.
-        // -- If the acc vec is 0, we should see a lin acc at 9.8G along the gyro's G vec
-        // -- if the vecs are misaligned, we should see a lin acc IVO the acc's vector, taking grav into account.
-        // -- If the vecs are 45 degrees out of alignment of equal mag, we should see 1G of lateral acceleration.
-        // if they are more than 45 degrees out of alignment, there is >1G of lateral acc.
 
         let accel_mag = accel_data.magnitude();
 
@@ -514,10 +480,6 @@ impl Ahrs {
         // This is in the aircraft's frame of reference.
         let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * self.cal.acc_len_at_rest);
 
-
-        // todo: Temp to tS
-        // let lin_acc_estimate = accel_data.to_normalized() - grav_axis_from_att_gyro;
-
         self.align(lin_acc_estimate, accel_data);
 
         // Store our linear acc estimate and accumulator before compensating for bias.
@@ -525,8 +487,6 @@ impl Ahrs {
                                                      // todo: Be careful about floating point errors over time.
                                                      // todo: Toss extreme values?
                                                      // todo: Lowpass?
-
-        // todo: Update biases automatically for a short window after bootup.
 
         let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
@@ -547,35 +507,35 @@ impl Ahrs {
         if unsafe { I } % 1000 == 0 {
             // if false {
             // println!("Ag: {}", _acc_gyro_alignment);
-            println!(
-                "\n\nLin bias: x{} y{} z{}",
-                self.cal.linear_acc_bias.x, self.cal.linear_acc_bias.y, self.cal.linear_acc_bias.z,
-            );
-
             // println!(
-            //     "Lin bias rem x{} y{} z{}. mag{}",
-            //     lin_acc_estimate_bias_removed.x,
-            //     lin_acc_estimate_bias_removed.y,
-            //     lin_acc_estimate_bias_removed.z,
-            //     lin_acc_estimate_bias_removed.magnitude()
+            //     "\n\nLin bias: x{} y{} z{}",
+            //     self.cal.linear_acc_bias.x, self.cal.linear_acc_bias.y, self.cal.linear_acc_bias.z,
             // );
 
-            print_quat(att_diff_rot, "Att diff rot");
-            println!("Att diff rot angle: {}", att_diff_rot.angle());
-            let a =  grav_axis_from_att_gyro * self.cal.acc_len_at_rest;
-            println!("Grav axis gyro x{} y{} z{}", a.x, a.y, a.z);
-            println!("Acc x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
-
             println!(
-                "Lin: x{} y{} z{}. mag{}",
-                lin_acc_estimate.x,
-                lin_acc_estimate.y,
-                lin_acc_estimate.z,
-                lin_acc_estimate.magnitude() // lin_acc_estimate.x,
-                                                          // lin_acc_estimate.y,
-                                                          // lin_acc_estimate.z,
-                                                          // lin_acc_estimate.magnitude()
+                "Lin acc: x{} y{} z{}. mag{}",
+                lin_acc_estimate_bias_removed.x,
+                lin_acc_estimate_bias_removed.y,
+                lin_acc_estimate_bias_removed.z,
+                lin_acc_estimate_bias_removed.magnitude()
             );
+
+            // print_quat(att_diff_rot, "Att diff rot");
+            // println!("Att diff rot angle: {}", att_diff_rot.angle());
+            let a = grav_axis_from_att_gyro * self.cal.acc_len_at_rest;
+            // println!("Grav axis gyro x{} y{} z{}", a.x, a.y, a.z);
+            println!("Acc x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
+            //
+            // println!(
+            //     "Lin: x{} y{} z{}. mag{}",
+            //     lin_acc_estimate.x,
+            //     lin_acc_estimate.y,
+            //     lin_acc_estimate.z,
+            //     lin_acc_estimate.magnitude() // lin_acc_estimate.x,
+            //                                               // lin_acc_estimate.y,
+            //                                               // lin_acc_estimate.z,
+            //                                               // lin_acc_estimate.magnitude()
+            // );
 
             // println!(
             //     "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
