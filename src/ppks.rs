@@ -131,12 +131,12 @@ impl PositInertial {
         dt: f32, // seconds
     ) {
         // todo: temp hard Hard-codefor testing.
-        self.anchor = PositVelEarthUnits {
-            lat_e8: 3500000000,
-            lon_e8: -7800000000,
-            elevation_msl: 0.,
-            velocity: Vec3::new(0., 1., 0.),
-        };
+        // self.anchor = PositVelEarthUnits {
+        //     lat_e8: 3500000000,
+        //     lon_e8: -7800000000,
+        //     elevation_msl: 0.,
+        //     velocity: Vec3::new(0., 1., 0.),
+        // };
 
         // todO: For debugging
         // let acc_lin = Vec3::new(
