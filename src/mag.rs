@@ -89,7 +89,7 @@ impl AhrsCal {
 
     /// Update mag calibration based on sample points.
     /// Only run this when there is recent data of each attitude category of points.
-    pub fn update_mag_cal(&mut self) {
+    pub fn update_mag_cal(&mut self, update_amt: f32) {
         // Flatten our sample data organized by points; that format is only used to ensure a
         // good selection of points, ie fairly weighted on all sides.
         let mut sample_pts = [Vec3::new_zero(); TOTAL_MAG_SAMPLE_PTS];
@@ -129,6 +129,14 @@ impl AhrsCal {
             soft_iron.data[5],
             soft_iron.data[8]
         );
+
+        let update_amt_inv = 1. - update_amt;
+
+        self.hard_iron = self.hard_iron.clone() * update_amt_inv + hard_iron * update_amt;
+        self.soft_iron = self.soft_iron.clone() * update_amt_inv + soft_iron * update_amt;
+
+        // todo: Save to flash, but not that this should probably not be done while airborne
+        // todo as flash access can cause the program to hang. (?)
 
         // Reset our sample counters. We leave the sample data in place, since we can still
         // use the readings in the next calibration. (Since we initiate cal without completely
@@ -268,25 +276,20 @@ impl Ahrs {
         if i % self.config.update_ratio_mag_cal_log as u32 == 0 {
             self.cal.log_mag_cal_pt(self.attitude, mag_raw);
 
-            // If we've filled most categories, initiate calibration.
-            let mut num_filled_cats = 0;
+            // If we've filled up most of our sample slots, divided by directional category, initiate cal.
+            // Note that additional samples in a filled cat don't count towards this value.
+            let mut samples_taken = 0;
 
             for cat_count in self.cal.mag_sample_count_up {
-                if cat_count == MAG_SAMPLES_PER_CAT as u8 {
-                    num_filled_cats += 1;
-                }
+                samples_taken += cat_count;
             }
-            // todo: DRY
             for cat_count in self.cal.mag_sample_count_fwd {
-                if cat_count == MAG_SAMPLES_PER_CAT as u8 {
-                    num_filled_cats += 1;
-                }
+                samples_taken += cat_count;
             }
 
-            if num_filled_cats as f32 / (SAMPLE_VERTICES.len() * 2) as f32
-                >= self.config.mag_cat_portion_req
+            if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
             {
-                self.cal.update_mag_cal();
+                self.cal.update_mag_cal(self.config.mag_cal_update_amt);
             }
         }
 

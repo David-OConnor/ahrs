@@ -67,7 +67,8 @@ pub const SAMPLE_VERTICES: [Vec3; 20] = [
 pub const SAMPLE_VERTEX_ANGLE: f32 = 0.7297276562166872;
 
 // We need at least this many samples per category before calibrating.
-pub const MAG_SAMPLES_PER_CAT: usize = 5;
+// Note: We'd ideally like this to be higher, but are experiencing stack overflows eg at 5.
+pub const MAG_SAMPLES_PER_CAT: usize = 2;
 
 // // times 2, since we're comparing to perpendicular vectors to each point.
 pub const TOTAL_MAG_SAMPLE_PTS: usize = MAG_SAMPLES_PER_CAT * SAMPLE_VERTICES.len() * 2;

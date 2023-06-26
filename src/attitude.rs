@@ -77,7 +77,9 @@ pub struct AhrsConfig {
     /// cause delayed calibration.
     pub update_ratio_mag_cal_log: u16,
     /// This portion of 1 categories must be filled to initiate a calibration.
-    pub mag_cat_portion_req: f32,
+    pub mag_cal_portion_req: f32,
+    /// A value of 1.0 means new mag cals replace the prev. 0.5 means an average.
+    pub mag_cal_update_amt: f32,
 }
 
 impl Default for AhrsConfig {
@@ -98,7 +100,8 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 50,
-            mag_cat_portion_req: 0.8,
+            mag_cal_portion_req: 0.8,
+            mag_cal_update_amt: 0.3,
         }
     }
 }
