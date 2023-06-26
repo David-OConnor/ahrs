@@ -68,8 +68,9 @@ pub const SAMPLE_VERTEX_ANGLE: f32 = 0.7297276562166872;
 
 // We need at least this many samples per category before calibrating.
 pub const MAG_SAMPLES_PER_CAT: usize = 5;
-// pub const MAG_SAMPLES_PER_CAT: usize = 10; // todo: TS flash space issue
-pub const TOTAL_MAG_SAMPLE_PTS: usize = MAG_SAMPLES_PER_CAT * SAMPLE_VERTICES.len();
+
+// // times 2, since we're comparing to perpendicular vectors to each point.
+pub const TOTAL_MAG_SAMPLE_PTS: usize = MAG_SAMPLES_PER_CAT * SAMPLE_VERTICES.len() * 2;
 
 /// least squares fit to a 3D-ellipsoid
 /// Ax^2 + By^2 + Cz^2 +  Dxy +  Exz +  Fyz +  Gx +  Hy +  Iz  = 1
