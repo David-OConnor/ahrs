@@ -141,54 +141,6 @@ impl ImuReadings {
     }
 }
 
-/// Update the attitude from the AHRS.
-/// Make sure calibration has been applied prior to this step.
-pub fn get_attitude(
-    ahrs: &mut Ahrs,
-    imu_readings: &ImuReadings,
-    mag_readings: Option<Vec3>,
-) -> Quaternion {
-    // Gyro measurements - not really a vector.
-    // In our IMU interpretation, we use direction references that make sense for our aircraft.
-    // See `ImuReadings` field descriptions for this. Here, we undo it: The AHRS
-    // fusion algorithm expects raw readings. (See the - signs there and here; they correspond)
-
-    // ICM dirs: X right, Y back, Z up
-    // Pitch nose up, roll right wing down, yaw CCW
-    // LIS3 mat: X left, Y back, z up
-
-    // Note; The ICM42688 uses the right hand rule for relating accelerometer and gyro readings.
-
-    let accel_data = Vec3 {
-        x: imu_readings.a_x,
-        y: imu_readings.a_y, // negative due to our IMU's coord system.
-        z: imu_readings.a_z,
-    };
-
-    let gyro_data = Vec3 {
-        x: imu_readings.v_pitch,
-        y: imu_readings.v_roll,
-        z: imu_readings.v_yaw,
-    };
-
-    match mag_readings {
-        Some(m) => {
-            let mag_data = Vec3 {
-                x: -m.y, // negative due to our mag's coord system.
-                y: -m.x,
-                z: m.z,
-            };
-
-            ahrs.update(gyro_data, accel_data, Some(mag_data));
-        }
-        None => {
-            ahrs.update(gyro_data, accel_data, None);
-        }
-    }
-
-    ahrs.attitude
-}
-
 /// Output: m/s^2, or Output: rad/s.
 pub fn interpret_accel_or_gyro(val: i16, fullscale: f32) -> f32 {
     (val as f32 / i16::MAX as f32) * fullscale

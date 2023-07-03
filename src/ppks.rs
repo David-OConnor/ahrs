@@ -10,7 +10,7 @@ use lin_alg2::f32::{Quaternion, Vec3};
 
 use crate::Fix;
 
-const FIX_FUSED_SIZE: usize = 36;
+pub const FIX_FUSED_SIZE: usize = 8 * 3 + 4 * 5;
 
 const DEG_SCALE_1E8: f32 = 100_000_000.;
 
@@ -90,14 +90,14 @@ impl PositFused {
         let mut result = [0; FIX_FUSED_SIZE];
 
         result[0..8].copy_from_slice(&self.timestamp_us.to_le_bytes());
-        result[8..12].copy_from_slice(&self.lat_e8.to_le_bytes());
-        result[12..16].copy_from_slice(&self.lon_e8.to_le_bytes());
-        result[16..20].copy_from_slice(&self.elevation_hae.to_le_bytes());
-        result[20..24].copy_from_slice(&self.elevation_msl.to_le_bytes());
+        result[8..16].copy_from_slice(&self.lat_e8.to_le_bytes());
+        result[16..24].copy_from_slice(&self.lon_e8.to_le_bytes());
+        result[24..28].copy_from_slice(&self.elevation_hae.to_le_bytes());
+        result[28..32].copy_from_slice(&self.elevation_msl.to_le_bytes());
 
-        result[24..28].copy_from_slice(&self.ned_velocity[0].to_le_bytes());
-        result[28..32].copy_from_slice(&self.ned_velocity[1].to_le_bytes());
-        result[32..36].copy_from_slice(&self.ned_velocity[2].to_le_bytes());
+        result[32..36].copy_from_slice(&self.ned_velocity[0].to_le_bytes());
+        result[36..40].copy_from_slice(&self.ned_velocity[1].to_le_bytes());
+        result[40..44].copy_from_slice(&self.ned_velocity[2].to_le_bytes());
 
         result
     }

@@ -99,6 +99,13 @@ pub fn ls_ellipsoid(sample_pts: &[Vec3; TOTAL_MAG_SAMPLE_PTS]) -> [f32; 10] {
 
     for i in 0..TOTAL_MAG_SAMPLE_PTS {
         let (xi, yi, zi) = (sample_pts[i].x, sample_pts[i].y, sample_pts[i].z);
+
+        // A sample pt value of 0 means no data on that point.
+        const EPS: f32 = 0.0000001;
+        if xi.abs() < EPS && yi.abs() < EPS && zi.abs() < EPS {
+            continue;
+        }
+
         J.set_row(
             i,
             &na::RowSVector::from([

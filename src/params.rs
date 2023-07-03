@@ -56,51 +56,64 @@ pub struct Params {
     // pub mag_data: Option<Vec3>,
 }
 
+use defmt::println;
+
 impl Params {
     /// Update params with IMU readings, and attitude. If filtering IMU readings, to so before
     /// running this.
     pub fn update_from_imu_readings(
         &mut self,
-        imu_data: &ImuReadings,
-        mag_data: Option<Vec3>,
-        // attitude: Quaternion,
-        // accel_linear: Vec3,
-        // acc_cal: &crate::ImuCalibration,
+        imu_readings: &ImuReadings,
+        mag_readings: Option<Vec3>,
         ahrs: &mut Ahrs,
         dt: f32,
     ) {
-        // todo: This is a good place to apply IMU calibration.
+        let accel_data = Vec3 {
+            x: imu_readings.a_x,
+            y: imu_readings.a_y,
+            z: imu_readings.a_z,
+        };
 
-        // todo: Is accel cal required given your bias algo?
+        let gyro_data = Vec3 {
+            x: imu_readings.v_pitch,
+            y: imu_readings.v_roll,
+            z: imu_readings.v_yaw,
+        };
 
-        // Calculate angular acceleration. Do this before updating velocities, since we use
-        // the prev ones here.
-        self.a_pitch = (imu_data.v_pitch - self.v_pitch) / dt;
-        self.a_roll = (imu_data.v_roll - self.v_roll) / dt;
-        self.a_yaw = (imu_data.v_yaw - self.v_yaw) / dt;
+        // Invert x and y for mag due to the coordinate system it uses.
+        // todo: DO we want this??
+        let mag_data = match mag_readings {
+            Some(m) => {
+                Some(Vec3 {
+                    x: -m.x, // negative due to our mag's coord system.
+                    y: -m.y,
+                    z: m.z,
+                })
+            }
+            None => None,
+        };
 
-        // Apply filtered gyro and accel readings directly to self.
-        self.v_pitch = imu_data.v_pitch;
-        self.v_roll = imu_data.v_roll;
-        self.v_yaw = imu_data.v_yaw;
+        ahrs.update(gyro_data, accel_data, mag_data);
 
-        let cal = &ahrs.cal;
-
-        // Update in-place to since we pass this to the attitude-finder.
-        let mut imu_data2 = (*imu_data).clone();
-
-        imu_data2.a_x = imu_data.a_x * cal.acc_slope.x - cal.acc_bias.x;
-        imu_data2.a_y = imu_data.a_y * cal.acc_slope.y - cal.acc_bias.y;
-        imu_data2.a_z = imu_data.a_z * cal.acc_slope.z - cal.acc_bias.z;
-
-        self.a_x = imu_data2.a_x;
-        self.a_y = imu_data2.a_y;
-        self.a_z = imu_data2.a_z;
-
-        self.attitude = crate::get_attitude(ahrs, &imu_data2, mag_data);
-
+        // Now that we've estimated attitude, and applied calibrations, update parameters.
+        self.attitude = ahrs.attitude;
         self.accel_linear = ahrs.linear_acc_estimate;
 
-        // self.mag_data = mag_data;
+        let acc_calibrated = ahrs.acc_calibrated;
+        let gyro_calibrated = ahrs.gyro_calibrated;
+
+        self.a_x = acc_calibrated.x;
+        self.a_y = acc_calibrated.y;
+        self.a_z = acc_calibrated.z;
+
+        // Calculate angular acceleration. Do this before updating velocities, since we use
+        // the previous ones here.
+        self.a_pitch = (gyro_calibrated.x - self.v_pitch) / dt;
+        self.a_roll = (gyro_calibrated.y - self.v_roll) / dt;
+        self.a_yaw = (gyro_calibrated.z - self.v_yaw) / dt;
+
+        self.v_pitch = gyro_calibrated.x;
+        self.v_roll = gyro_calibrated.y;
+        self.v_yaw = gyro_calibrated.z;
     }
 }

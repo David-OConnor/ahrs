@@ -99,16 +99,19 @@ impl Default for AhrsConfig {
             mag_cal_timestep: 0.05,
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
-            update_ratio_mag_cal_log: 50,
-            mag_cal_portion_req: 0.8,
+            update_ratio_mag_cal_log: 160,
+            mag_cal_portion_req: 0.85,
             mag_cal_update_amt: 0.3,
         }
     }
 }
 
 pub struct AhrsCal {
+    /// Subtract this from readings to calibrate.
     pub acc_bias: Vec3,
     pub acc_slope: Vec3,
+    /// Subtract this from readings to calibrate.
+    pub gyro_bias: Vec3,
     /// linear acceleration, per axis, integrated over time. We use this to
     /// remove biases, under the assumption that this should average out to 0, along
     /// each axis.
@@ -138,6 +141,7 @@ impl Default for AhrsCal {
         Self {
             acc_bias: Vec3::new_zero(),
             acc_slope: Vec3::new(1., 1., 1.),
+            gyro_bias: Vec3::new_zero(),
             linear_acc_cum: Vec3::new_zero(),
             linear_acc_bias: Vec3::new_zero(),
             // hard_iron: Vec3::new_zero(),
@@ -165,76 +169,87 @@ impl AhrsCal {
         self.acc_bias.y = acc_data.y;
         self.acc_bias.z = acc_data.z - G;
     }
+
+    fn apply_cal_acc(&self, data: Vec3) -> Vec3 {
+        Vec3::new(
+            data.x * self.acc_slope.x - self.acc_bias.x,
+            data.y * self.acc_slope.y - self.acc_bias.y,
+            data.z * self.acc_slope.z - self.acc_bias.z,
+        )
+    }
+
+    fn apply_cal_gyro(&self, data: Vec3) -> Vec3 {
+        Vec3::new(
+            // todo: Slope?
+            data.x - self.gyro_bias.x,
+            data.y - self.gyro_bias.y,
+            data.z - self.gyro_bias.z,
+        )
+    }
 }
 
+#[derive(Default)]
 pub struct Ahrs {
     pub config: AhrsConfig,
     pub cal: AhrsCal,
     pub attitude: Quaternion,
+    pub linear_acc_estimate: Vec3,
+    /// We set this var upon the first update; this forces the gyro to take a full update from the
+    /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
+    /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
+    pub initialized: bool,
     pub(crate) att_from_gyros: Quaternion,
     pub(crate) att_from_acc: Quaternion,
     pub(crate) att_from_mag: Option<Quaternion>,
+    pub(crate) acc_calibrated: Vec3,
+    pub(crate) gyro_calibrated: Vec3,
+    pub(crate) mag_calibrated: Option<Vec3>,
     /// We use these to stored headings to track magnetometer health over time.
-    pub heading_mag: Option<f32>,
+    pub(crate) heading_mag: Option<f32>,
     pub(crate) heading_gyro: f32,
-    pub linear_acc_estimate: Vec3,
     // linear_acc_confidence: f32, // todo?
     /// Track recent changing in mag heading, per change in gyro heading, in degrees.
     /// We use this to assess magnetometer health, ie if it's being interfered with.
     /// This is `None` if there are no mag reading provided.
     pub(crate) recent_dh_mag_dh_gyro: Option<f32>,
     /// Use our gyro/acc fused attitude to estimate magnetic inclination.
-    pub mag_inclination_estimate: f32,
+    pub(crate) mag_inclination_estimate: f32,
     // mag_cal_in_progress: bool,
-    /// Timestamp, in seconds.
-    timestamp: f32,
     /// Time between updates, in seconds.
     pub(crate) dt: f32,
     // /// Radians
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
-    pub mag_declination: f32,
-    /// We set this var upon the first update; this forces the gyro to take a full update from the
-    /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
-    /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
-    pub initialized: bool,
+    pub(crate) mag_declination: f32,
+    /// Timestamp, in seconds.
+    timestamp: f32,
 }
 
 impl Ahrs {
     pub fn new(dt: f32) -> Self {
         Self {
-            config: AhrsConfig::default(),
-            cal: AhrsCal::default(),
-            attitude: Quaternion::new_identity(),
-            att_from_gyros: Quaternion::new_identity(),
-            att_from_acc: Quaternion::new_identity(),
-            att_from_mag: None,
-            heading_mag: None,
-            heading_gyro: 0.,
-            linear_acc_estimate: Vec3::new_zero(),
-            recent_dh_mag_dh_gyro: None,
-            mag_inclination_estimate: -1.2,
-            // mag_cal_in_progress: true, // todo temp true
-            timestamp: 0.,
             dt,
-            // mag_inclination: -1.2,    // Rough
             mag_declination: -0.032, // Raleigh
-            initialized: false,
+            mag_inclination_estimate: -1.2,
+            ..Default::default()
         }
     }
 
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
+        let acc_calibrated = self.cal.apply_cal_acc(accel_data);
+        let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+
         // todo: A system where any 2/3 of your sources can, in agreement, update the biases
         // todo of the third.
-        let accel_norm = accel_data.to_normalized();
+        let accel_norm = acc_calibrated.to_normalized();
 
         // Estimate attitude from raw accelerometer and gyro data. Note that
         // The gyro data reguarly receives updates from the acc and mag.
         let att_acc = att_from_accel(accel_norm);
         self.att_from_acc = att_acc;
 
-        let mut att_gyro = att_from_gyro(gyro_data, self.att_from_gyros, self.dt);
+        let mut att_gyro = att_from_gyro(gyro_calibrated, self.att_from_gyros, self.dt);
 
         let heading_gyro = heading_from_att(att_gyro);
 
@@ -260,9 +275,11 @@ impl Ahrs {
             }
         }
 
-        let (update_gyro_from_acc, lin_acc_estimate) = self.handle_linear_acc(accel_data, att_gyro);
+        let (update_gyro_from_acc, lin_acc_estimate) =
+            self.handle_linear_acc(acc_calibrated, att_gyro);
 
-        let att_acc_w_lin_removed = att_from_accel((accel_data - lin_acc_estimate).to_normalized());
+        let att_acc_w_lin_removed =
+            att_from_accel((acc_calibrated - lin_acc_estimate).to_normalized());
 
         let mut att_fused = att_gyro;
 
@@ -324,10 +341,10 @@ impl Ahrs {
 
             println!(
                 "Acc: x{} y{} z{} mag{}",
-                accel_data.x,
-                accel_data.y,
-                accel_data.z,
-                accel_data.magnitude()
+                acc_calibrated.x,
+                acc_calibrated.y,
+                acc_calibrated.z,
+                acc_calibrated.magnitude()
             );
 
             // println!("\nHeading fused: {:?}\n", heading_fused);

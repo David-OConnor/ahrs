@@ -18,9 +18,9 @@ use defmt::println;
 
 impl AhrsCal {
     /// Apply the hard and soft iron offsets to our readings.
-    pub fn apply_mag_cal(&self, mag_data: Vec3) -> Vec3 {
+    pub fn apply_cal_mag(&self, data: Vec3) -> Vec3 {
         // todo: Why this clone?
-        self.soft_iron.clone() * (mag_data - self.hard_iron)
+        self.soft_iron.clone() * (data - self.hard_iron)
     }
 
     // /// Estimate hard iron offset from the filled data buffer.
@@ -75,15 +75,20 @@ impl AhrsCal {
             if count[sample_category] < MAG_SAMPLES_PER_CAT as u8 {
                 count[sample_category] += 1;
             }
+        }
 
-            // To display status.
-            if false {
-                let mut num_pts_left = 0;
-                for cat in count {
-                    num_pts_left += MAG_SAMPLES_PER_CAT as u8 - *cat;
-                }
-                println!("Logging mag pt. Num left: {}", num_pts_left);
+        // To display status.
+        if false {
+            // todo: You should multiply this by the portion req.
+            let mut num_pts_left = TOTAL_MAG_SAMPLE_PTS;
+            for cat_count in &self.mag_sample_count_up {
+                num_pts_left -= *cat_count as usize;
             }
+            for cat_count in &self.mag_sample_count_fwd {
+                num_pts_left -= *cat_count as usize;
+            }
+
+            println!("Logging mag pt. Num left: {}", num_pts_left);
         }
     }
 
@@ -94,11 +99,17 @@ impl AhrsCal {
         // good selection of points, ie fairly weighted on all sides.
         let mut sample_pts = [Vec3::new_zero(); TOTAL_MAG_SAMPLE_PTS];
 
+        const EPS: f32 = 0.0000001;
+
         let mut i = 0;
         println!("\n\n\n[");
         for data in &[self.mag_cal_data_up, self.mag_cal_data_fwd] {
             for cat in data {
                 for point in cat {
+                    if point.x.abs() < EPS && point.y.abs() < EPS && point.z.abs() < EPS {
+                        continue;
+                    }
+
                     sample_pts[i] = *point;
                     println!("({}, {}, {}),", point.x, point.y, point.z);
                     i += 1;
@@ -152,15 +163,7 @@ impl AhrsCal {
 
 impl Ahrs {
     pub(crate) fn handle_mag(&mut self, mut mag_raw: Vec3, heading_gyro: f32, i: u32) {
-        // // todo: Is this where we want this?
-        // if self.mag_cal_in_progress {
-        //     // self.cal.mag_cal_state.log_hard_iron(mag);
-        //     // return;
-        // } else {
-        //     let mut mag = self.cal.apply_mag_cal(mag);
-        // }
-        //
-        let mut mag = self.cal.apply_mag_cal(mag_raw);
+        let mag = self.cal.apply_cal_mag(mag_raw);
 
         const EPS: f32 = 0.0000001;
         if mag.x.abs() < EPS && mag.y.abs() < EPS && mag.z.abs() < EPS {
@@ -170,9 +173,9 @@ impl Ahrs {
 
         // todo: Not sure why we have to do this swap.
         // do the swap after applying cal.
-        let y = mag.y;
-        mag.y = mag.x;
-        mag.x = y;
+        // let y = mag.y;
+        // mag.y = mag.x;
+        // mag.x = y;
 
         let mag_norm = mag.to_normalized();
 
@@ -245,13 +248,24 @@ impl Ahrs {
             }
         }
 
-        // if i % 1000 == 0 {
-        if false {
+        if i % 1000 == 0 {
+            // if false {
+            //     println!(
+            //         "\n\nMag norm: x{} y{} z{} len{}",
+            //         mag_norm.x,
+            //         mag_norm.y,
+            //         mag_norm.z,
+            //         mag.magnitude()
+            //     );
+
+            let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
+            println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
+
             println!(
-                "\n\nMag norm: x{} y{} z{} len{}",
-                mag_norm.x,
-                mag_norm.y,
-                mag_norm.z,
+                "\n\nMag: x{} y{} z{} len{}",
+                mag.x,
+                mag.y,
+                mag.z,
                 mag.magnitude()
             );
 
