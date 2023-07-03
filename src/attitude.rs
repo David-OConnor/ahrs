@@ -45,7 +45,11 @@ pub struct AhrsConfig {
     /// This value can be thought of as the 1 / the number of seconds to correct a gyro reading to match the
     /// accelerometer. Keep this in mind re expectations of gyro drift rate. It must be high enough to
     /// compensate for drift (but perhaps not much higher)
-    pub update_from_acc_amt: f32,
+    pub update_amt_att_from_acc: f32,
+    /// Affects how much gyro biases are updated from the accelerometer-based angular rate
+    /// estimation. This should be relatively low, since we don't expect the bias to change much,
+    /// and the acc readings are noisy, but stable over time.
+    pub update_amt_gyro_bias_from_acc: f32,
     pub update_port_mag_heading: f32,
     // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
     // /// G x these values (low, high).
@@ -88,7 +92,8 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
-            update_from_acc_amt: 3.,
+            update_amt_att_from_acc: 3.,
+            update_amt_gyro_bias_from_acc: 0.01,
             update_port_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
@@ -133,7 +138,6 @@ pub struct AhrsCal {
     acc_len_at_rest: f32,
     /// Used when aligning.
     acc_len_cum: f32,
-    // mag_cal_state: MagCalState,
 }
 
 impl Default for AhrsCal {
@@ -148,15 +152,14 @@ impl Default for AhrsCal {
             // Rough, from GPS mag can.
             hard_iron: Vec3::new_zero(),
             soft_iron: Mat3::new_identity(),
-            mag_cal_data_up: [[Vec3::new_zero(); MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
-            mag_cal_data_fwd: [[Vec3::new_zero(); MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
+            mag_cal_data_up: Default::default(),
+            mag_cal_data_fwd: Default::default(),
             mag_sample_i_up: Default::default(),
             mag_sample_i_fwd: Default::default(),
             mag_sample_count_up: Default::default(),
             mag_sample_count_fwd: Default::default(),
             acc_len_cum: 0.,
             acc_len_at_rest: G,
-            // mag_cal_state: Default::default(),
         }
     }
 }
@@ -207,6 +210,8 @@ pub struct Ahrs {
     /// We use these to stored headings to track magnetometer health over time.
     pub(crate) heading_mag: Option<f32>,
     pub(crate) heading_gyro: f32,
+    // /// Estimatated angular rates from the accelerometer-based attitude.
+    // pub(crate) acc_rate_estimate: Vec3,
     // linear_acc_confidence: f32, // todo?
     /// Track recent changing in mag heading, per change in gyro heading, in degrees.
     /// We use this to assess magnetometer health, ie if it's being interfered with.
@@ -221,6 +226,10 @@ pub struct Ahrs {
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
     pub(crate) mag_declination: f32,
+    /// Long-term difference between accelerometer and gyro readings. Over long periods of time,
+    /// the acc-determined angular rate will be reliable due to the fixed reference of gravity.
+    /// We use this to zero-out gyro offsets.
+    acc_gyro_rate_diff: Vec3,
     /// Timestamp, in seconds.
     timestamp: f32,
 }
@@ -242,11 +251,16 @@ impl Ahrs {
 
         // todo: A system where any 2/3 of your sources can, in agreement, update the biases
         // todo of the third.
+
+        // todo: FIgure out what here should have IIR lowpass filters aplied.
+
         let accel_norm = acc_calibrated.to_normalized();
 
         // Estimate attitude from raw accelerometer and gyro data. Note that
         // The gyro data reguarly receives updates from the acc and mag.
         let att_acc = att_from_accel(accel_norm);
+
+        let att_acc_prev = self.att_from_acc;
         self.att_from_acc = att_acc;
 
         let mut att_gyro = att_from_gyro(gyro_calibrated, self.att_from_gyros, self.dt);
@@ -285,6 +299,11 @@ impl Ahrs {
 
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
+
+        // These variables here are only used to inspect and debug.
+        let mut acc_rate_estimate = Vec3::new_zero();
+        let mut acc_gyro_rate_diff = Vec3::new_zero();
+
         if update_gyro_from_acc {
             // println!("TRUE");
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
@@ -294,8 +313,10 @@ impl Ahrs {
             let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
             // let rot_gyro_to_acc = Quaternion::from_unit_vecs(accel_norm, gyro_up);
 
-            let rot_to_apply_to_gyro = Quaternion::new_identity()
-                .slerp(rot_gyro_to_acc, self.config.update_from_acc_amt * self.dt);
+            let rot_to_apply_to_gyro = Quaternion::new_identity().slerp(
+                rot_gyro_to_acc,
+                self.config.update_amt_att_from_acc * self.dt,
+            );
 
             // if unsafe { I } % 1000 == 0 {
             if false {
@@ -305,9 +326,9 @@ impl Ahrs {
 
             att_fused = rot_to_apply_to_gyro * att_gyro;
 
-            // Careful; this replaces the gyro data.
-            // self.att_from_gyros = att_fused;
-            // att_gyro = att_fused;
+            // Note that we are only updating gyro biases if under relatively low linear acceleration.
+            (acc_rate_estimate, acc_gyro_rate_diff) =
+                self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
         }
 
         // todo note: In your current iteration, att fused and att gyro in state are the same.
@@ -333,19 +354,45 @@ impl Ahrs {
             // let euler = self.attitude.to_euler();
             // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
 
-            print_quat(self.attitude, "\n\nAtt fused");
+            // print_quat(self.attitude, "\n\nAtt fused");
 
-            print_quat(self.att_from_acc, "Att Acc");
+            // print_quat(self.att_from_acc, "Att Acc");
+
+            // Temp: offset at idle appears to be -0.015, -0.01, .004
+            println!(
+                "\nGyro raw: x{} y{} z{}",
+                gyro_data.x, gyro_data.y, gyro_data.z,
+            );
+
+            println!(
+                "Acc rate: x{} y{} z{}",
+                acc_rate_estimate.x, acc_rate_estimate.y, acc_rate_estimate.z,
+            );
+
+            println!(
+                "Acc gyro rate diff inst: x{} y{} z{}",
+                acc_gyro_rate_diff.x, acc_gyro_rate_diff.y, acc_gyro_rate_diff.z,
+            );
+
+            println!(
+                "Acc gyro rate diff: x{} y{} z{}",
+                self.acc_gyro_rate_diff.x, self.acc_gyro_rate_diff.y, self.acc_gyro_rate_diff.z,
+            );
+
+            println!(
+                "Gyro Cal: x{} y{} z{}\n",
+                gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
+            );
 
             // print_quat(self.att_from_gyros, "Att gyros");
 
-            println!(
-                "Acc: x{} y{} z{} mag{}",
-                acc_calibrated.x,
-                acc_calibrated.y,
-                acc_calibrated.z,
-                acc_calibrated.magnitude()
-            );
+            // println!(
+            //     "Acc: x{} y{} z{} mag{}",
+            //     acc_calibrated.x,
+            //     acc_calibrated.y,
+            //     acc_calibrated.z,
+            //     acc_calibrated.magnitude()
+            // );
 
             // println!("\nHeading fused: {:?}\n", heading_fused);
 
@@ -505,6 +552,37 @@ impl Ahrs {
 
             println!("\n\nAlignment complete \n\n");
         }
+    }
+
+    /// Update gyro bias from accelerometer-determined angular rate.
+    /// Returns the rate estimate from accelerometer, and the instantaneous difference from
+    /// gyro rate, for use in inspection and debugging.
+    fn update_gyro_bias(
+        &mut self,
+        gyro_raw: Vec3,
+        att_acc: Quaternion,
+        att_from_acc_prev: Quaternion,
+    ) -> (Vec3, Vec3) {
+        let d_att_acc = att_acc * att_from_acc_prev.inverse();
+        let d_att_axes = d_att_acc.to_axes();
+
+        // We notice that, at least when there is little linear acc, this value bounces around
+        // the correct one. It generally has a higher error magnitude than the gyros, but perhaps
+        // it's average is better.
+        // let acc_rate_estimate = Vec3::new(d_att_acc.x, d_att_acc.y, d_att_acc.z) / self.dt;
+        let acc_rate_estimate = Vec3::new(d_att_axes.0, d_att_axes.1, d_att_axes.2) / self.dt;
+
+        let acc_gyro_rate_diff = acc_rate_estimate - gyro_raw;
+
+        let update_amt = self.config.update_amt_gyro_bias_from_acc * self.dt;
+        let update_amt_inv = 1. - update_amt;
+
+        self.acc_gyro_rate_diff =
+            self.acc_gyro_rate_diff * update_amt_inv + acc_gyro_rate_diff * update_amt;
+
+        self.cal.gyro_bias = -self.acc_gyro_rate_diff; // todo temp: Something more sophisticated?
+
+        (acc_rate_estimate, acc_gyro_rate_diff)
     }
 }
 
