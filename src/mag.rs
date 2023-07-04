@@ -162,7 +162,7 @@ impl AhrsCal {
 }
 
 impl Ahrs {
-    pub(crate) fn handle_mag(&mut self, mut mag_raw: Vec3, heading_gyro: f32, i: u32) {
+    pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, heading_gyro: f32, i: u32) {
         let mag = self.cal.apply_cal_mag(mag_raw);
 
         const EPS: f32 = 0.0000001;
@@ -261,8 +261,17 @@ impl Ahrs {
             let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
 
+                        println!(
+                "\n\nMag raw: x{} y{} z{} len{}",
+                mag_raw.x,
+                mag_raw.y,
+                mag_raw.z,
+                mag_raw.magnitude()
+            );
+
+
             println!(
-                "\n\nMag: x{} y{} z{} len{}",
+                "Mag: x{} y{} z{} len{}",
                 mag.x,
                 mag.y,
                 mag.z,

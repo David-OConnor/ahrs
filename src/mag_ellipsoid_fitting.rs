@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 //! http://www.juddzone.com/ALGORITHMS/least_squares_3D_ellipsoid.html
+//! http://www.juddzone.com/ALGORITHMS/least_squares_precision_3D_ellipsoid.html
 //! Has detailed examples, but unfortunately they rely on lin alg ops like inverse
 //! on n-degree matrices.
 //!
@@ -214,7 +215,7 @@ pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Mat3) {
     // let rd = &R.data;
 
     #[rustfmt::skip]
-    let R3 = Matrix3::new(
+        let R3 = Matrix3::new(
         R[(0, 0)],R[(0, 1)],R[(0, 2)],
         R[(1, 0)],R[(1, 1)],R[(1, 2)],
         R[(2, 0)],R[(2, 1)],R[(2, 2)],
@@ -254,7 +255,7 @@ pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Mat3) {
 
     // Our constructor is column-major. nalgebra indices are row-first.
     #[rustfmt::skip]
-    let M = Mat3::new([
+        let M = Mat3::new([
         M[(0, 0)], M[(1, 0)], M[(2, 0)],
         M[(0, 1)], M[(1, 1)], M[(2, 1)],
         M[(0, 2)], M[(1, 2)], M[(2, 2)],
@@ -265,3 +266,171 @@ pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Mat3) {
     // ie hard-iron and soft-iron
     (center, M)
 }
+
+
+
+
+// "Iterative" appraoch below
+
+
+// todo: If this approach works and is performant enough, remove the nalg dependency and above code.
+
+fn mag_dot_acc_err(mag: Vec3,acc: Vec3, mdg: Vec3, params: &[f32; 12]) -> Vec3 {
+    // offset and transformation matrix from parameters
+    let ofs = Vec3::new(params[0], params[1], params[2]);
+
+    // let mat = np.reshape(params[3..12],(3,3));
+    // Col-major.
+    #[rustfmt::skip]
+    let mat = Mat3::new([
+        params[3], params[6], params[9],
+        params[4], params[7], params[10],
+        params[5], params[8], params[11],
+    ]);
+
+    // subtract offset, then apply transformation matrix
+    let mc= mag - ofs;
+
+    let mm = mat.dot(mc);
+
+    // calculate dot product from corrected mags
+    let mdg1 = mm.dot(acc);
+
+    mdg-mdg1
+
+}
+
+fn analytic_partial_row(mag: Vec3,acc: Vec3, target: Vec3, params: &[f32; 12]) -> (Vec3, [f32; 12]){
+    let err0 = magDotAccErr(mag, acc, target, params);
+    // ll = len(params)
+    let mut slopeArr = [0.; 12];
+
+    slopeArr[0] = -(params[3] * acc.x + params[4] * acc.y + params[5] * acc.z);
+    slopeArr[1] = -(params[6] * acc.x + params[7] * acc.y + params[8] * acc.z);
+    slopeArr[2] = -(params[9] * acc.x + params[10] * acc.y + params[11] * acc.z);
+
+    slopeArr[3] = (mag.x - params[0]) * acc.x;
+    slopeArr[4] = (mag.y - params[1]) * acc.x;
+    slopeArr[5] = (mag.z - params[2]) * acc.x;
+
+    slopeArr[6] = (mag.x - params[0]) * acc.y;
+    slopeArr[7] = (mag.y - params[1]) * acc.y;
+    slopeArr[8] = (mag.z - params[2]) * acc.y;
+
+    slopeArr[9] = (mag.x - params[0]) * acc.z;
+    slopeArr[10] = (mag.y - params[1]) * acc.z;
+    slopeArr[11] = (mag.z - params[2]) * acc.z;
+
+    (err0, slopeArr)
+}
+
+fn numericPartialRow(mag: Vec3,acc: Vec3, target: Vec3, params: &mut [f32; 12], step: usize) -> (Vec3, [f32; 12]) {
+    let err0 = mag_dot_acc_err(mag, acc, target, params);
+
+    // let ll = params.len();
+    const ll: usize = 12;
+    let mut slopeArr = [0.; ll];
+
+    for ix in 0..ll {
+        params[ix] = params[ix] + step[ix];
+        errA = mag_dot_acc_err(mag, acc, target, params);
+
+        params[ix] = params[ix] - 2.0 * step[ix];
+        errB = mag_dot_acc_err(mag, acc, target, params);
+
+        params[ix] = params[ix] + step[ix];
+        slope = (errB - errA) / (2.0 * step[ix]);
+
+        slopeArr[ix] = slope;
+    }
+
+    (err0, slopeArr)
+}
+
+
+fn ellipsoid_iterate(mag: Vec3,accel: Vec3,verbose: bool) -> ([f32; 12], Vec3) {
+
+   let magCorrected=mag.clone();
+   // Obtain an estimate of the center and radius
+   // For an ellipse we estimate the radius to be the average distance
+   // of all data points to the center
+   (centerE,magR,magSTD)=ellipsoid_estimate2(mag,verbose);
+
+   // Work with normalized data
+   magScaled=mag/magR;
+   centerScaled = centerE/magR;
+
+   (accNorm,accR)=normalize3(accel);
+
+   let params = [0.; 12];
+   // Use the estimated offsets, but our transformation matrix is unity
+   params[0:3]=centerScaled;
+
+    let mat = Mat3::new_identity();
+
+   params[3:12]=np.reshape(mat,(1,9));
+
+   // initial dot based on centered mag, scaled with average radius
+   magCorrected=applyParams12(magScaled,params)
+   (avgDot,stdDot)=mgDot(magCorrected,accNorm)
+
+   let nSamples= magScaled.len();
+   let sigma = errorEstimate(magScaled,accNorm,avgDot,params);
+   if verbose {
+       println!("Initial sigma: {}", sigma);
+   }
+
+   // pre allocate the data.  We do not actually need the entire
+   // D matrix if we calculate DTD (a 12x12 matrix) within the sample loop
+   // Also DTE (dimension 12) can be calculated on the fly.
+
+    // let D = [0.]
+   D=np.zeros([nSamples,12]);
+   let E= [0.; nSAMPLES];
+
+   // If numeric derivatives are used, this step size works with normalized data.
+   let step = [1./5_000.; 12];
+
+   // Fixed number of iterations for testing.  In production you check for convergence
+
+   let nLoops= 5;
+
+   for iloop in 0..nLoops {
+      // Numeric or analytic partials each give the same answer
+      for ix in 0..nSamples {
+          // (f0,pdiff)=numericPartialRow(magScaled[ix],accNorm[ix],avgDot,params,step,1)
+          (f0, pdiff) = analyticPartialRow(magScaled[ix], accNorm[ix], avgDot, params)
+          E[ix] = f0;
+          D[ix] = pdiff;
+      }
+      // Use the pseudo-inverse
+      DT=D.T;
+      DTD=np.dot(DT,D);
+      DTE=np.dot(DT,E);
+      invDTD=inv(DTD);
+      deltas=np.dot(invDTD,DTE);
+
+
+      p2=params + deltas;
+
+      sigma = errorEstimate(magScaled,accNorm,avgDot,p2);
+
+      // add some checking here on the behavior of sigma from loop to loop
+      // if satisfied, use the new set of parameters for the next iteration
+
+      params=p2;
+
+      // recalculste gain (magR) and target dot product
+      magCorrected=applyParams12(magScaled,params);
+      (mc,mcR)=normalize3(magCorrected);
+      (avgDot,stdDot)=mgDot(mc,accNorm);
+      magR *= mcR;
+      magScaled=mag/magR;
+
+      if verbose {
+          println!("iloop: {}, sigma: {}", iloop, sigma);
+      }
+    }
+
+   (params,magR)
+

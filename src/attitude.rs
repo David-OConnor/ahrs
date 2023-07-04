@@ -93,7 +93,7 @@ impl Default for AhrsConfig {
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_gyro_bias_from_acc: 0.01,
+            update_amt_gyro_bias_from_acc: 0.10,
             update_port_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
@@ -300,10 +300,6 @@ impl Ahrs {
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
 
-        // These variables here are only used to inspect and debug.
-        let mut acc_rate_estimate = Vec3::new_zero();
-        let mut acc_gyro_rate_diff = Vec3::new_zero();
-
         if update_gyro_from_acc {
             // println!("TRUE");
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
@@ -325,18 +321,31 @@ impl Ahrs {
             }
 
             att_fused = rot_to_apply_to_gyro * att_gyro;
+        }
 
-            // Note that we are only updating gyro biases if under relatively low linear acceleration.
+        // These variables here are only used to inspect and debug.
+        let mut acc_rate_estimate = Vec3::new_zero();
+        let mut acc_gyro_rate_diff = Vec3::new_zero();
+
+        // Note that we are only updating gyro biases if under relatively low linear acceleration. We use
+        // a lower threshold than the gyro-updates algorithm above, since we don't need to update biases often,
+        // so can afford to be pickier.
+        if lin_acc_estimate.magnitude() < self.config.lin_acc_thresh / 2. {
             (acc_rate_estimate, acc_gyro_rate_diff) =
                 self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
         }
+
+
+        // todo: Updating regardless of linear acc??
+        //     (acc_rate_estimate, acc_gyro_rate_diff) =
+        //         self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
 
         // todo note: In your current iteration, att fused and att gyro in state are the same.
         self.attitude = att_fused;
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -354,7 +363,7 @@ impl Ahrs {
             // let euler = self.attitude.to_euler();
             // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
 
-            // print_quat(self.attitude, "\n\nAtt fused");
+            print_quat(self.attitude, "\n\nAtt fused");
 
             // print_quat(self.att_from_acc, "Att Acc");
 
@@ -364,15 +373,15 @@ impl Ahrs {
                 gyro_data.x, gyro_data.y, gyro_data.z,
             );
 
-            println!(
-                "Acc rate: x{} y{} z{}",
-                acc_rate_estimate.x, acc_rate_estimate.y, acc_rate_estimate.z,
-            );
+            // println!(
+            //     "Acc rate: x{} y{} z{}",
+            //     acc_rate_estimate.x, acc_rate_estimate.y, acc_rate_estimate.z,
+            // );
 
-            println!(
-                "Acc gyro rate diff inst: x{} y{} z{}",
-                acc_gyro_rate_diff.x, acc_gyro_rate_diff.y, acc_gyro_rate_diff.z,
-            );
+            // println!(
+            //     "Acc gyro rate diff inst: x{} y{} z{}",
+            //     acc_gyro_rate_diff.x, acc_gyro_rate_diff.y, acc_gyro_rate_diff.z,
+            // );
 
             println!(
                 "Acc gyro rate diff: x{} y{} z{}",
@@ -455,9 +464,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
+        // todo: Be careful about floating point errors over time.
+        // todo: Toss extreme values?
+        // todo: Lowpass?
 
         let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
@@ -530,7 +539,7 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             // Maybe this will help with bias estimates before we set it properly.
             self.cal.acc_len_at_rest = acc_data.magnitude();
@@ -543,7 +552,7 @@ impl Ahrs {
         // todo: Rework this.
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;

@@ -81,7 +81,6 @@ impl Params {
         };
 
         // Invert x and y for mag due to the coordinate system it uses.
-        // todo: DO we want this??
         let mag_data = match mag_readings {
             Some(m) => {
                 Some(Vec3 {
