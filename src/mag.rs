@@ -240,7 +240,7 @@ impl Ahrs {
 
                 if i % 1000 == 0 {
                     // if false {
-                    println!("Estimated mag incl: {}", inclination_estimate);
+                    // println!("Estimated mag incl: {}", inclination_estimate);
                 }
             } else {
                 // Take the full update on the first run.
@@ -261,7 +261,7 @@ impl Ahrs {
             let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
 
-                        println!(
+            println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
                 mag_raw.y,
@@ -269,6 +269,12 @@ impl Ahrs {
                 mag_raw.magnitude()
             );
 
+            println!(
+                "\n\nMag raw norm: x{} y{} z{}",
+                mag_raw.to_normalized().x,
+                mag_raw.to_normalized().y,
+                mag_raw.to_normalized().z,
+            );
 
             println!(
                 "Mag: x{} y{} z{} len{}",
@@ -388,4 +394,13 @@ pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
     // } else {
     //     3. * TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
     // }
+}
+
+// Let's look at a different approach to mag calibration; from first principles.
+/// It's important to note that this calibration procedure is best performed iteratively,
+/// or with a known good starting point. This is due to rotations around the gravitational axis
+/// being from gyroscope readings unless mag data is good.
+/// `cal_map` contains averaged magenetometer readings taken
+fn apply_mag_cal(mag_data: Vec3, attitude: Quaternion, cal_map: &[(Quaternion, Vec3)]) -> Vec3 {
+    Vec3::new_zero()
 }

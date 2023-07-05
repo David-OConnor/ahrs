@@ -17,7 +17,7 @@ const DEG_SCALE_1E8: f32 = 100_000_000.;
 use defmt::println;
 
 /// Convert NED velocity in mm/s to xyz velocity in m/s. (Still in earth frame.
-fn ned_vel_to_xyz(ned_vel: [i32; 3]) -> Vec3 {
+pub fn ned_vel_to_xyz(ned_vel: [i32; 3]) -> Vec3 {
     Vec3::new(
         ned_vel[1] as f32 / 1_000.,
         ned_vel[0] as f32 / 1_000.,
@@ -52,6 +52,8 @@ impl PositFused {
         let gnss_dr = PositVelEarthUnits::from_fix_dr(fix, timestamp);
 
         // todo: If dt since last fix is longer, weigh INS more.
+
+        // todo: Update heading from Inertial + GNSS accelerations (Change in NSE velocity).
 
         let inertial_absolute = inertial.combine_with_anchor();
 

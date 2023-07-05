@@ -105,7 +105,7 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.85,
+            mag_cal_portion_req: 0.90,
             mag_cal_update_amt: 0.3,
         }
     }
@@ -335,7 +335,6 @@ impl Ahrs {
                 self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
         }
 
-
         // todo: Updating regardless of linear acc??
         //     (acc_rate_estimate, acc_gyro_rate_diff) =
         //         self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
@@ -345,7 +344,7 @@ impl Ahrs {
 
         self.att_from_acc = att_acc;
         self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
+                                         // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -464,9 +463,9 @@ impl Ahrs {
 
         // Store our linear acc estimate and accumulator before compensating for bias.
         self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-        // todo: Be careful about floating point errors over time.
-        // todo: Toss extreme values?
-        // todo: Lowpass?
+                                                     // todo: Be careful about floating point errors over time.
+                                                     // todo: Toss extreme values?
+                                                     // todo: Lowpass?
 
         let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
@@ -539,7 +538,7 @@ impl Ahrs {
     fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
         if self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             // Maybe this will help with bias estimates before we set it properly.
             self.cal.acc_len_at_rest = acc_data.magnitude();
@@ -552,7 +551,7 @@ impl Ahrs {
         // todo: Rework this.
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
@@ -713,4 +712,28 @@ fn mag_offsets_from_points(sample_pts: &[Vec3]) -> (Mat3, Vec3) {
     let soft_iron = Mat3::new_identity();
 
     (soft_iron, hard_iron)
+}
+
+/// gnss_acc: in m/s; differed from subsequent readings.
+pub fn heading_from_gnss_acc(gnss_acc_nse: Vec3, acc_lin_imu: Vec3) -> f32 {
+    // Note that we only care about the relative directions; magnitude of acceleration isn't required.
+
+    // let acc_lin_nse = Quaternion::from_unit_vecs(
+    //     acc_lin_imu.to_normalized(),
+    //     gnss_acc_nse.to_normalized()
+    // );
+
+    let att_from_gnss =
+        Quaternion::from_unit_vecs(gnss_acc_nse.to_normalized(), acc_lin_imu.to_normalized());
+
+    static mut I: u32 = 0;
+    unsafe { I += 1 };
+
+    if unsafe { I } % 10 == 0 {
+        print_quat(att_from_gnss, "Att from gnss");
+    }
+
+    println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
+
+    heading_from_att(att_from_gnss)
 }
