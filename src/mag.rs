@@ -194,6 +194,21 @@ impl Ahrs {
         let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
         // let heading_mag = heading_from_att(att_mag);
 
+        let heading_diff = -heading_mag - heading_gyro;
+
+        let rotation = if self.initialized {
+            // Accept the whole magnetometer update.
+            Quaternion::from_axis_angle(UP, heading_diff)
+        } else {
+            // Nudge the heading in the direction of the gyro.
+            Quaternion::from_axis_angle(
+                UP,
+                heading_diff * self.config.update_amt_mag_heading * self.dt,
+            )
+        };
+
+        self.att_from_gyros = rotation * self.att_from_gyros;
+
         // Assess magnetometer health by its comparison in rate change compared to the gyro.
         match self.heading_mag {
             Some(heading_mag_prev) => {
@@ -201,10 +216,16 @@ impl Ahrs {
                 // todo: Since even a messed up mag seems to show constant readings
                 // todo when there is no rotation, consider only logging values here if
                 // todo dh/dt exceeds a certain value.
-                self.recent_dh_mag_dh_gyro = Some(
-                    (heading_mag - heading_mag_prev) / self.dt
-                        - (heading_gyro - self.heading_gyro) / self.dt,
-                );
+
+                let dmag_dt = (heading_mag - heading_mag_prev) / self.dt;
+                let dgyro_dt = (heading_gyro - self.heading_gyro) / self.dt;
+
+                self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
+
+
+                if i % 1_000 == 0 {
+                    println!("Dmag: {} Dgyro: {} diff: {}", dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro);
+                }
 
                 // Fuse heading from gyro with heading from mag.
                 if self.recent_dh_mag_dh_gyro.unwrap().abs() < self.config.mag_gyro_diff_thresh {
@@ -220,33 +241,7 @@ impl Ahrs {
 
         self.heading_mag = Some(heading_mag);
 
-        // todo: Inclination will be tracked and modified; not set independently every time.
-        let mag_on_fwd_plane = mag_earth_ref.project_to_plane(RIGHT);
-
-        // todo: This is currently heavily-dependent on pitch! Likely due to earth ref being wrong?
-        // Negative since it's a rotation below the horizon.
-        let inclination_estimate = -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
-
-        // No need to update the ratio each time.
-        if i % self.config.update_ratio_mag_incl as u32 == 0 {
-            if self.initialized {
-                // Weighted average of current inclination estimate with stored.
-                let incl_ratio = self.config.update_amt_mag_incl_estimate
-                    * self.dt
-                    * self.config.update_ratio_mag_incl as f32;
-
-                self.mag_inclination_estimate = (self.mag_inclination_estimate * (1. - incl_ratio)
-                    + inclination_estimate * incl_ratio);
-
-                if i % 1000 == 0 {
-                    // if false {
-                    // println!("Estimated mag incl: {}", inclination_estimate);
-                }
-            } else {
-                // Take the full update on the first run.
-                self.mag_inclination_estimate = inclination_estimate;
-            }
-        }
+        self.estimate_mag_inclination(mag_earth_ref, i);
 
         if i % 1000 == 0 {
             // if false {
@@ -258,38 +253,38 @@ impl Ahrs {
             //         mag.magnitude()
             //     );
 
-            let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
-            println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
+            // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
+            // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
 
-            println!(
-                "\n\nMag raw: x{} y{} z{} len{}",
-                mag_raw.x,
-                mag_raw.y,
-                mag_raw.z,
-                mag_raw.magnitude()
-            );
+            // println!(
+            //     "\n\nMag raw: x{} y{} z{} len{}",
+            //     mag_raw.x,
+            //     mag_raw.y,
+            //     mag_raw.z,
+            //     mag_raw.magnitude()
+            // );
 
-            println!(
-                "\n\nMag raw norm: x{} y{} z{}",
-                mag_raw.to_normalized().x,
-                mag_raw.to_normalized().y,
-                mag_raw.to_normalized().z,
-            );
+            // println!(
+            //     "\n\nMag raw norm: x{} y{} z{}",
+            //     mag_raw.to_normalized().x,
+            //     mag_raw.to_normalized().y,
+            //     mag_raw.to_normalized().z,
+            // );
 
-            println!(
-                "Mag: x{} y{} z{} len{}",
-                mag.x,
-                mag.y,
-                mag.z,
-                mag.magnitude()
-            );
+            // println!(
+            //     "Mag: x{} y{} z{} len{}",
+            //     mag.x,
+            //     mag.y,
+            //     mag.z,
+            //     mag.magnitude()
+            // );
 
-            println!("Estimated mag incl Cum: {}", self.mag_inclination_estimate);
+            // println!("Estimated mag incl Cum: {}", self.mag_inclination_estimate);
 
-            println!(
-                "Mag earth: x{} y{} z{}",
-                mag_earth_ref.x, mag_earth_ref.y, mag_earth_ref.z
-            );
+            // println!(
+            //     "Mag earth: x{} y{} z{}",
+            //     mag_earth_ref.x, mag_earth_ref.y, mag_earth_ref.z
+            // );
 
             print_quat(att_mag, "Att mag");
 
@@ -347,6 +342,34 @@ impl Ahrs {
         //     }
         // }
     }
+
+    /// Estimate magnetic inclination. The returned value is in readians, down from
+    /// the horizon.
+    fn estimate_mag_inclination(&mut self, mag_earth_ref: Vec3, i: u32) {
+        // todo: Inclination will be tracked and modified; not set independently every time.
+        let mag_on_fwd_plane = mag_earth_ref.project_to_plane(RIGHT);
+
+        // todo: This is currently heavily-dependent on pitch! Likely due to earth ref being wrong?
+        // Negative since it's a rotation below the horizon.
+        let inclination_estimate = -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
+
+        // No need to update the ratio each time.
+        if i % self.config.update_ratio_mag_incl as u32 == 0 {
+            if self.initialized {
+                // Weighted average of current inclination estimate with stored.
+                let incl_ratio = self.config.update_amt_mag_incl_estimate
+                    * self.dt
+                    * self.config.update_ratio_mag_incl as f32;
+
+                self.mag_inclination_estimate = (self.mag_inclination_estimate * (1. - incl_ratio)
+                    + inclination_estimate * incl_ratio)
+
+            } else {
+                // Take the full update on the first run.
+                self.mag_inclination_estimate = inclination_estimate;
+            }
+        }
+    }
 }
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
@@ -378,7 +401,8 @@ pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
     // let mag_earth_ref = att_without_heading.inverse().rotate_vec(mag_norm);
     // let mag_earth_ref = att_without_heading.rotate_vec(mag_norm);
 
-    let mag_heading = (3. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
+    // let mag_heading = (3. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
+    let mag_heading = (1. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
     mag_heading + declination
 
     // return TAU / 4. - mag_norm.x.atan2(mag_norm.y);

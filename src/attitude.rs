@@ -50,7 +50,7 @@ pub struct AhrsConfig {
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
     /// and the acc readings are noisy, but stable over time.
     pub update_amt_gyro_bias_from_acc: f32,
-    pub update_port_mag_heading: f32,
+    pub update_amt_mag_heading: f32,
     // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
     // /// G x these values (low, high).
     // /// todo: Alternative: Adjust adjustment-towards-acc weight value based on this, vice
@@ -94,7 +94,7 @@ impl Default for AhrsConfig {
             mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
             update_amt_gyro_bias_from_acc: 0.10,
-            update_port_mag_heading: 0.1,
+            update_amt_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
             lin_acc_thresh: 0.3,     // m/s^2
@@ -244,6 +244,12 @@ impl Ahrs {
         }
     }
 
+    fn aligning(&self) -> bool {
+        self.timestamp > self.config.start_alignment_time as f32
+            && self.timestamp
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+    }
+
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         let acc_calibrated = self.cal.apply_cal_acc(accel_data);
@@ -266,9 +272,6 @@ impl Ahrs {
         let mut att_gyro = att_from_gyro(gyro_calibrated, self.att_from_gyros, self.dt);
 
         let heading_gyro = heading_from_att(att_gyro);
-
-        // todo: Remove `heading_gyro` if you end up not using it.
-        self.heading_gyro = heading_gyro;
 
         // See comment on the `initialized` field.
         // We update initialized state at the end of this function, since other steps rely on it.
@@ -296,6 +299,10 @@ impl Ahrs {
             att_from_accel((acc_calibrated - lin_acc_estimate).to_normalized());
 
         let mut att_fused = att_gyro;
+
+        // Make sure we update heading_gyro after mag handling; we use it to diff gyro heading.
+        // todo: Remove `heading_gyro` if you end up not using it.
+        self.heading_gyro = heading_gyro;
 
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
@@ -391,8 +398,6 @@ impl Ahrs {
                 "Gyro Cal: x{} y{} z{}\n",
                 gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
             );
-
-            // print_quat(self.att_from_gyros, "Att gyros");
 
             // println!(
             //     "Acc: x{} y{} z{} mag{}",
@@ -536,10 +541,7 @@ impl Ahrs {
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
     fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
-        if self.timestamp > self.config.start_alignment_time as f32
-            && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
-        {
+        if self.aligning() {
             // Maybe this will help with bias estimates before we set it properly.
             self.cal.acc_len_at_rest = acc_data.magnitude();
 
@@ -730,10 +732,13 @@ pub fn heading_from_gnss_acc(gnss_acc_nse: Vec3, acc_lin_imu: Vec3) -> f32 {
     unsafe { I += 1 };
 
     if unsafe { I } % 10 == 0 {
-        print_quat(att_from_gnss, "Att from gnss");
-    }
+        // print_quat(att_from_gnss, "Att from gnss");
 
-    println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
+        // println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
+    }
+    // println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
+
+    // println!("TEST");
 
     heading_from_att(att_from_gnss)
 }
