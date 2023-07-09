@@ -162,7 +162,7 @@ impl AhrsCal {
 }
 
 impl Ahrs {
-    pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, heading_gyro: f32, i: u32) {
+    pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, att_fused: &mut Quaternion, heading_fused: f32, i: u32) {
         let mag = self.cal.apply_cal_mag(mag_raw);
 
         const EPS: f32 = 0.0000001;
@@ -194,7 +194,7 @@ impl Ahrs {
         let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
         // let heading_mag = heading_from_att(att_mag);
 
-        let heading_diff = -heading_mag - heading_gyro;
+        let heading_diff = -heading_mag - heading_fused;
 
         let rotation = if self.initialized {
             // Accept the whole magnetometer update.
@@ -207,7 +207,7 @@ impl Ahrs {
             )
         };
 
-        self.att_from_gyros = rotation * self.att_from_gyros;
+        *att_fused = rotation * *att_fused;
 
         // Assess magnetometer health by its comparison in rate change compared to the gyro.
         match self.heading_mag {
@@ -218,7 +218,7 @@ impl Ahrs {
                 // todo dh/dt exceeds a certain value.
 
                 let dmag_dt = (heading_mag - heading_mag_prev) / self.dt;
-                let dgyro_dt = (heading_gyro - self.heading_gyro) / self.dt;
+                let dgyro_dt = (heading_fused - self.heading_gyro) / self.dt;
 
                 self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
 

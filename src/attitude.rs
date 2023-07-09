@@ -201,7 +201,7 @@ pub struct Ahrs {
     /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
     /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
     pub initialized: bool,
-    pub(crate) att_from_gyros: Quaternion,
+    // pub(crate) att_from_gyros: Quaternion,
     pub(crate) att_from_acc: Quaternion,
     pub(crate) att_from_mag: Option<Quaternion>,
     pub(crate) acc_calibrated: Vec3,
@@ -255,9 +255,6 @@ impl Ahrs {
         let acc_calibrated = self.cal.apply_cal_acc(accel_data);
         let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
 
-        // todo: A system where any 2/3 of your sources can, in agreement, update the biases
-        // todo of the third.
-
         // todo: FIgure out what here should have IIR lowpass filters aplied.
 
         let accel_norm = acc_calibrated.to_normalized();
@@ -269,23 +266,20 @@ impl Ahrs {
         let att_acc_prev = self.att_from_acc;
         self.att_from_acc = att_acc;
 
-        let mut att_gyro = att_from_gyro(gyro_calibrated, self.att_from_gyros, self.dt);
+        let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
 
-        let heading_gyro = heading_from_att(att_gyro);
+        let heading_fused = heading_from_att(att_fused);
 
         // See comment on the `initialized` field.
         // We update initialized state at the end of this function, since other steps rely on it.
         if !self.initialized {
-            self.att_from_gyros = att_acc;
-            att_gyro = self.att_from_gyros;
+            att_fused = att_acc;
         }
-
-        let mut heading_fused = heading_gyro;
 
         // Fuse with mag data if available.
         match mag_data {
             Some(mut mag) => {
-                self.handle_mag(mag, heading_gyro, unsafe { I });
+                self.handle_mag(mag, &mut att_fused, heading_fused, unsafe { I });
             }
             None => {
                 self.recent_dh_mag_dh_gyro = None;
@@ -293,16 +287,14 @@ impl Ahrs {
         }
 
         let (update_gyro_from_acc, lin_acc_estimate) =
-            self.handle_linear_acc(acc_calibrated, att_gyro);
+            self.handle_linear_acc(acc_calibrated, att_fused);
 
         let att_acc_w_lin_removed =
             att_from_accel((acc_calibrated - lin_acc_estimate).to_normalized());
 
-        let mut att_fused = att_gyro;
-
         // Make sure we update heading_gyro after mag handling; we use it to diff gyro heading.
         // todo: Remove `heading_gyro` if you end up not using it.
-        self.heading_gyro = heading_gyro;
+        self.heading_gyro = heading_fused;
 
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
@@ -312,11 +304,11 @@ impl Ahrs {
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
             // much linear acceleration.
             // This rotation is heading-invariant: Rotate the gyro *up* towards the acc *up*.
-            let gyro_up = att_gyro.rotate_vec(UP);
+            let gyro_up = att_fused.rotate_vec(UP);
             let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
             // let rot_gyro_to_acc = Quaternion::from_unit_vecs(accel_norm, gyro_up);
 
-            let rot_to_apply_to_gyro = Quaternion::new_identity().slerp(
+            let rot_acc_correction = Quaternion::new_identity().slerp(
                 rot_gyro_to_acc,
                 self.config.update_amt_att_from_acc * self.dt,
             );
@@ -327,7 +319,7 @@ impl Ahrs {
                 println!("rot angle: {}", rot_gyro_to_acc.angle());
             }
 
-            att_fused = rot_to_apply_to_gyro * att_gyro;
+            att_fused = rot_acc_correction * att_fused;
         }
 
         // These variables here are only used to inspect and debug.
@@ -350,8 +342,8 @@ impl Ahrs {
         self.attitude = att_fused;
 
         self.att_from_acc = att_acc;
-        self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-                                         // self.att_from_gyros = att_gyro;
+        // self.att_from_gyros = att_fused; // todo: QC if this is what you want.
+        // self.att_from_gyros = att_gyro;
 
         self.timestamp += self.dt;
 
@@ -361,7 +353,6 @@ impl Ahrs {
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
-
         if unsafe { I } % 1000 == 0 {
             // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
