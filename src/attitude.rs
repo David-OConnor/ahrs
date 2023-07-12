@@ -20,6 +20,7 @@ use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
 
 use crate::{
+    linear_acc,
     mag_ellipsoid_fitting::{self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES},
     print_quat, FORWARD, G, RIGHT, UP,
 };
@@ -286,8 +287,30 @@ impl Ahrs {
             }
         }
 
-        let (update_gyro_from_acc, lin_acc_estimate) =
-            self.handle_linear_acc(acc_calibrated, att_fused);
+        // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
+        let (lin_acc_estimate, lin_acc_estimate_bias_removed) = linear_acc::from_gyro(
+            acc_calibrated,
+            att_fused,
+            self.cal.acc_len_at_rest,
+            self.cal.linear_acc_bias,
+        );
+
+        self.align(lin_acc_estimate, accel_data);
+        self.linear_acc_estimate = lin_acc_estimate_bias_removed;
+
+        // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
+        let mut update_gyro_from_acc = false;
+        // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
+        if (acc_calibrated.magnitude() - self.cal.acc_len_at_rest).abs()
+            < self.config.total_accel_thresh
+        {
+            // We guess no linear acc since we're getting close to 1G. Note that
+            // this will produce false positives in some cases.
+            update_gyro_from_acc = true;
+        } else if lin_acc_estimate_bias_removed.magnitude() < self.config.lin_acc_thresh {
+            // If not under much acceleration, re-cage our attitude.
+            update_gyro_from_acc = true;
+        }
 
         let att_acc_w_lin_removed =
             att_from_accel((acc_calibrated - lin_acc_estimate).to_normalized());
@@ -344,6 +367,9 @@ impl Ahrs {
         self.att_from_acc = att_acc;
         // self.att_from_gyros = att_fused; // todo: QC if this is what you want.
         // self.att_from_gyros = att_gyro;
+
+        self.acc_calibrated = acc_calibrated;
+        self.gyro_calibrated = gyro_calibrated;
 
         self.timestamp += self.dt;
 
@@ -409,125 +435,6 @@ impl Ahrs {
                 self.recent_dh_mag_dh_gyro.unwrap_or(69.)
             );
         }
-    }
-
-    /// Attempt to separate linear from gravitational acceleration.
-    /// Returns the estimate mof linear acceleration. This is useful for
-    /// #1: Determining how much faith (and wight) to put into the accelerometer reading for
-    /// attitude determination.
-    /// #2: Providing an acc solution that's closer to the true one for this fusing.
-    /// #3: Removing linear acceleration when computing position from dead-reckoning
-    fn handle_linear_acc(
-        &mut self,
-        accel_data: Vec3,
-        // att_acc: Quaternion,
-        // // att gyro must have heading removed, or acc must have heading added.
-        att_gyro: Quaternion,
-    ) -> (bool, Vec3) {
-        //  Ways to identify linear acceleration:
-        // - Greater or less than 1G of acceleration, if the accel is calibrated.
-        // - Discontinuities or other anomolies when integrating accel-based attitude over time,
-        // - or, along those lines, discontinuities etc when fusing with gyro.
-
-        // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
-        // the accelerometer's normalized vector when linear acceleration is 0.
-        let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
-
-        // Estimate linear acceleration by comparing the accelerometer's normalized vector (indicating the
-        // direction it resists gravity) with that estimated from the gyro. This is a proxy for linear
-        // acceleration.
-
-        let accel_mag = accel_data.magnitude();
-
-        // For this, we postulate that the gyro's attitude is correct, and therefore the force
-        // for gravity is that axis's *up* vector, multiplied by G. The difference between the accelerometer
-        // readings and this, therefore is linear acceleration.
-        // This linear acc estimate is in earth coords.
-
-        // todo: Project to elim heading effects?
-        let att_acc_non_norm = att_from_accel(accel_data.to_normalized());
-        let att_diff_rot = att_acc_non_norm * att_gyro.inverse();
-
-        // acc = lin + grav
-        // lin = acc - (grav_axis_gyro * G)
-        // For the purpose of this calculation, we are assuming the real gravitation axis is
-        // that determined by the gyro.
-        // This is in the aircraft's frame of reference.
-        let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * self.cal.acc_len_at_rest);
-
-        self.align(lin_acc_estimate, accel_data);
-
-        // Store our linear acc estimate and accumulator before compensating for bias.
-        self.linear_acc_estimate = lin_acc_estimate; // todo: DOn't take all of it; fuse with current value.
-                                                     // todo: Be careful about floating point errors over time.
-                                                     // todo: Toss extreme values?
-                                                     // todo: Lowpass?
-
-        let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
-
-        let mut update_gyro_from_acc = false;
-        // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
-        if (accel_mag - self.cal.acc_len_at_rest).abs() < self.config.total_accel_thresh {
-            // We guess no linear acc since we're getting close to 1G. Note that
-            // this will produce false positives in some cases.
-            update_gyro_from_acc = true;
-        } else if lin_acc_estimate_bias_removed.magnitude() < self.config.lin_acc_thresh {
-            // If not under much acceleration, re-cage our attitude.
-            update_gyro_from_acc = true;
-        }
-
-        static mut I: u32 = 0;
-        unsafe { I += 1 };
-
-        if unsafe { I } % 1000 == 0 {
-            // if false {
-            // println!("Ag: {}", _acc_gyro_alignment);
-            // println!(
-            //     "\n\nLin bias: x{} y{} z{}",
-            //     self.cal.linear_acc_bias.x, self.cal.linear_acc_bias.y, self.cal.linear_acc_bias.z,
-            // );
-
-            println!(
-                "Lin acc: x{} y{} z{}. mag{}",
-                lin_acc_estimate_bias_removed.x,
-                lin_acc_estimate_bias_removed.y,
-                lin_acc_estimate_bias_removed.z,
-                lin_acc_estimate_bias_removed.magnitude()
-            );
-
-            // print_quat(att_diff_rot, "Att diff rot");
-            // println!("Att diff rot angle: {}", att_diff_rot.angle());
-            let a = grav_axis_from_att_gyro * self.cal.acc_len_at_rest;
-            // println!("Grav axis gyro x{} y{} z{}", a.x, a.y, a.z);
-            println!("Acc x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
-            //
-            // println!(
-            //     "Lin: x{} y{} z{}. mag{}",
-            //     lin_acc_estimate.x,
-            //     lin_acc_estimate.y,
-            //     lin_acc_estimate.z,
-            //     lin_acc_estimate.magnitude() // lin_acc_estimate.x,
-            //                                               // lin_acc_estimate.y,
-            //                                               // lin_acc_estimate.z,
-            //                                               // lin_acc_estimate.magnitude()
-            // );
-
-            // println!(
-            //     "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
-            //     angle_diff_acc_gyro,
-            //     grav_axis_from_att_gyro.x,
-            //     grav_axis_from_att_gyro.y,
-            //     grav_axis_from_att_gyro.z
-            // );
-        }
-
-        // if unsafe { i } % 100 == 0 {
-        //     if !update_gyro_from_acc {
-        //         println!("Under lin acc");
-        //     }
-        // }
-
-        (update_gyro_from_acc, lin_acc_estimate_bias_removed)
     }
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
@@ -614,18 +521,6 @@ fn heading_from_att(att: Quaternion) -> f32 {
 
     let sign_z = -axis.z.signum();
     (axis.project_to_vec(UP) * angle).magnitude() * sign_z
-}
-
-/// Estimate linear acceleration, given a known (estimated) attitude, and the acceleration vector.
-pub fn get_linear_accel(accel: Vec3, att: Quaternion) -> Vec3 {
-    let mut accel_vec_earth_ref = att.rotate_vec(accel.to_normalized());
-
-    let accel_mag = accel.magnitude();
-
-    accel_vec_earth_ref *= accel_mag;
-    accel_vec_earth_ref.z -= G;
-
-    accel_vec_earth_ref
 }
 
 /// Find the vector associated with linear acceleration induced by a position

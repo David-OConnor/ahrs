@@ -12,6 +12,7 @@
 //! https://www.magnetic-declination.com/
 
 pub mod attitude;
+mod linear_acc;
 mod mag;
 mod mag_ellipsoid_fitting;
 pub mod params;

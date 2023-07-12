@@ -226,7 +226,6 @@ ax.set_zlabel('Mag Z')
 for x, y, z in points:
 	# apply cal
 	pts_cal = M @ (np.array([x, y, z]) - center)
-	# pts_cal = (np.array([x, y, z]) - center)
 
 	ax.scatter(pts_cal[0], pts_cal[1], pts_cal[2])
 

@@ -162,7 +162,13 @@ impl AhrsCal {
 }
 
 impl Ahrs {
-    pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, att_fused: &mut Quaternion, heading_fused: f32, i: u32) {
+    pub(crate) fn handle_mag(
+        &mut self,
+        mag_raw: Vec3,
+        att_fused: &mut Quaternion,
+        heading_fused: f32,
+        i: u32,
+    ) {
         let mag = self.cal.apply_cal_mag(mag_raw);
 
         const EPS: f32 = 0.0000001;
@@ -207,7 +213,8 @@ impl Ahrs {
             )
         };
 
-        *att_fused = rotation * *att_fused;
+        // todo: Put back.
+        // *att_fused = rotation * *att_fused;
 
         // Assess magnetometer health by its comparison in rate change compared to the gyro.
         match self.heading_mag {
@@ -222,9 +229,11 @@ impl Ahrs {
 
                 self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
 
-
                 if i % 1_000 == 0 {
-                    println!("Dmag: {} Dgyro: {} diff: {}", dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro);
+                    println!(
+                        "Dmag: {} Dgyro: {} diff: {}",
+                        dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro
+                    );
                 }
 
                 // Fuse heading from gyro with heading from mag.
@@ -363,7 +372,6 @@ impl Ahrs {
 
                 self.mag_inclination_estimate = (self.mag_inclination_estimate * (1. - incl_ratio)
                     + inclination_estimate * incl_ratio)
-
             } else {
                 // Take the full update on the first run.
                 self.mag_inclination_estimate = inclination_estimate;
