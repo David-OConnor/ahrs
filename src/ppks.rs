@@ -8,15 +8,13 @@ use num_traits::Float;
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::Fix;
+use crate::{Fix, DEG_SCALE_1E8};
 
 pub const FIX_FUSED_SIZE: usize = 8 * 3 + 4 * 5;
 
-const DEG_SCALE_1E8: f32 = 100_000_000.;
-
 use defmt::println;
 
-/// Convert NED velocity in mm/s to xyz velocity in m/s. (Still in earth frame.
+/// Convert NED velocity in mm/s to xyz velocity in m/s. (Still in earth frame.)
 pub fn ned_vel_to_xyz(ned_vel: [i32; 3]) -> Vec3 {
     Vec3::new(
         ned_vel[1] as f32 / 1_000.,
@@ -229,6 +227,15 @@ pub struct PositVelEarthUnits {
 }
 
 impl PositVelEarthUnits {
+    pub fn from_fix(fix: &Fix) -> Self {
+        Self {
+            lat_e8: (fix.lat_e7 as i64) * 10,
+            lon_e8: (fix.lon_e7 as i64) * 10,
+            elevation_msl: fix.elevation_msl as f32 / 1_000.,
+            velocity: ned_vel_to_xyz(fix.ned_velocity),
+        }
+    }
+
     /// Apply dead-reckoning to the most recent GNSS fix.
     /// Returns a result with lat, lon, and alt as f32.
     /// time is in seconds.

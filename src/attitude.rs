@@ -22,9 +22,10 @@ use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 use crate::{
     linear_acc,
     mag_ellipsoid_fitting::{self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES},
-    print_quat, FORWARD, G, RIGHT, UP,
+    print_quat, Fix, FORWARD, G, RIGHT, UP,
 };
 
+use crate::ppks::PositVelEarthUnits;
 use defmt::{println, write};
 
 pub struct AhrsConfig {
@@ -227,6 +228,9 @@ pub struct Ahrs {
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
     pub(crate) mag_declination: f32,
+    /// We use this location for updating linear acceleration using GNSS
+    /// todo: You may need a list of several to use the arc-radius approach.
+    pub(crate) fix_prev: Option<Fix>,
     /// Long-term difference between accelerometer and gyro readings. Over long periods of time,
     /// the acc-determined angular rate will be reliable due to the fixed reference of gravity.
     /// We use this to zero-out gyro offsets.
@@ -288,15 +292,18 @@ impl Ahrs {
         }
 
         // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
-        let (lin_acc_estimate, lin_acc_estimate_bias_removed) = linear_acc::from_gyro(
-            acc_calibrated,
-            att_fused,
-            self.cal.acc_len_at_rest,
-            self.cal.linear_acc_bias,
-        );
+        let lin_acc_estimate =
+            linear_acc::from_gyro(acc_calibrated, att_fused, self.cal.acc_len_at_rest);
 
-        self.align(lin_acc_estimate, accel_data);
-        self.linear_acc_estimate = lin_acc_estimate_bias_removed;
+        // let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
+
+        // todo: Rework alignment
+        // self.align(lin_acc_estimate, accel_data);
+
+        // self.linear_acc_estimate = lin_acc_estimate_bias_removed;
+        self.linear_acc_estimate = lin_acc_estimate;
+
+        let lin_acc_estimate_bias_removed = lin_acc_estimate; // todo: For now we removed bias removal
 
         // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
         let mut update_gyro_from_acc = false;
@@ -439,6 +446,8 @@ impl Ahrs {
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
     fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
+        // todo: Rework this.
+
         if self.aligning() {
             // Maybe this will help with bias estimates before we set it properly.
             self.cal.acc_len_at_rest = acc_data.magnitude();
@@ -448,7 +457,6 @@ impl Ahrs {
             // self.cal.linear_acc_cum += lin_acc_estimate;
         }
 
-        // todo: Rework this.
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
                 > (self.config.start_alignment_time + self.config.alignment_duration) as f32
@@ -491,6 +499,18 @@ impl Ahrs {
         self.cal.gyro_bias = -self.acc_gyro_rate_diff; // todo temp: Something more sophisticated?
 
         (acc_rate_estimate, acc_gyro_rate_diff)
+    }
+
+    /// Update the linear acc estimates and related state from a GNSS fix.
+    pub fn update_from_fix(&mut self, fix: &Fix) {
+        if let Some(fix_prev) = &self.fix_prev {
+            let lin_acc_gnss = linear_acc::from_gnss(fix, &fix_prev, self.attitude);
+        }
+
+        self.fix_prev = Some(fix.clone());
+
+        // todo: Perhaps
+        // let lin_acc_gnd_track = linear_acc::from_ground_track();
     }
 }
 

@@ -11,10 +11,14 @@
 /// - Greater or less than 1G of acceleration, if the accel is calibrated.
 /// - Discontinuities or other anomolies when integrating accel-based attitude over time,
 /// - or, along those lines, discontinuities etc when fusing with gyro.
-use crate::{attitude, ppks, Fix, G, UP};
+use crate::{
+    attitude::{self, Ahrs},
+    ppks, Fix, G, UP,
+};
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
+use crate::ppks::PositVelEarthUnits;
 use defmt::println;
 
 /// Estimate linear acceleration by comparing the fused attitude's up direction (based primarily
@@ -27,8 +31,7 @@ pub fn from_gyro(
     // // att gyro must have heading removed, or acc must have heading added.
     att_gyro: Quaternion,
     acc_len_at_rest: f32,
-    lin_acc_bias: Vec3,
-) -> (Vec3, Vec3) {
+) -> Vec3 {
     // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
     // the accelerometer's normalized vector when linear acceleration is 0.
     let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
@@ -53,8 +56,6 @@ pub fn from_gyro(
     // This is in the aircraft's frame of reference.
     let lin_acc_estimate = accel_data - (grav_axis_from_att_gyro * acc_len_at_rest);
 
-    let lin_acc_estimate_bias_removed = lin_acc_estimate - lin_acc_bias;
-
     static mut I: u32 = 0;
     unsafe { I += 1 };
 
@@ -68,10 +69,10 @@ pub fn from_gyro(
 
         println!(
             "Lin acc: x{} y{} z{}. mag{}",
-            lin_acc_estimate_bias_removed.x,
-            lin_acc_estimate_bias_removed.y,
-            lin_acc_estimate_bias_removed.z,
-            lin_acc_estimate_bias_removed.magnitude()
+            lin_acc_estimate.x,
+            lin_acc_estimate.y,
+            lin_acc_estimate.z,
+            lin_acc_estimate.magnitude()
         );
 
         // print_quat(att_diff_rot, "Att diff rot");
@@ -106,13 +107,79 @@ pub fn from_gyro(
     //     }
     // }
 
-    (lin_acc_estimate, lin_acc_estimate_bias_removed)
+    lin_acc_estimate
 }
 
 /// Estimate linear acceleration by differentiating GNSS-determined velocity.
-pub fn from_gnss(fix: &Fix, fix_prev: &Fix) -> Vec3 {
-    let d_v = ppks::ned_vel_to_xyz(fix.ned_velocity) - ppks::ned_vel_to_xyz(fix_prev.ned_velocity);
+/// Note that there is potentially a feedback loop from needing attitude to do this, and this
+/// feeding back into attitude. Hopefully the gyro can keep this from being a problem.
+pub(crate) fn from_gnss(fix: &Fix, fix_prev: &Fix, attitude: Quaternion) -> Vec3 {
+    let d_v_earth =
+        ppks::ned_vel_to_xyz(fix.ned_velocity) - ppks::ned_vel_to_xyz(fix_prev.ned_velocity);
+
+    // IIR seems not appropriate, but you need a moving avg etc.
+
+    let d_v = attitude.inverse().rotate_vec(d_v_earth);
+
     let d_t = fix.timestamp_s - fix_prev.timestamp_s;
 
     d_v / d_t
+}
+
+/// Estimate linear acceleration by examining short-term ground track turn radius.
+pub(crate) fn from_ground_track(posits_recent: &[PositVelEarthUnits; 5], interval_s: f32) -> Vec3 {
+    // In meters
+    let mut posits_m = [Vec3::new_zero(); 5];
+
+    for (i, posit) in posits_recent.iter().enumerate() {
+        posits_m[i] = Vec3 {
+            // todo: Acceptable precision using f32?
+            x: posit.lon_e8 as f32 / crate::DEG_SCALE_1E8,
+            y: posit.lat_e8 as f32 / crate::DEG_SCALE_1E8,
+            z: posit.elevation_msl,
+        }
+    }
+
+    // Ideally here we least-squares fit a circle in 3D space, but I'm not sure how to do this.
+    // https://www.mathworks.com/matlabcentral/answers/475212-circle-least-squares-fit-for-3d-data
+
+    // https://stackoverflow.com/questions/15481242/python-optimize-leastsq-fitting-a-circle-to-3d-set-of-points
+
+    //  Coordinates of the barycenter
+    let mut total = Vec3::new_zero();
+    for p in &posits_m {
+        total += *p;
+    }
+    let mean = total / posits_m.len() as f32;
+
+    // gradient descent minimisation method ###
+    // pnts = [[x[k], y[k], z[k]] for k in range(len(x))]
+    // meanP = Point(xm, ym, zm) # mean point
+    // Ri = [Point(*meanP).distance(Point(*pnts[k])) for k in range(len(pnts))] # radii to the points
+    // Rm = math.fsum(Ri) / len(Ri) # mean radius
+    // dR = Rm + 10 # difference between mean radii
+    // alpha = 0.1
+    // c = meanP
+    // cArr = []
+    // while dR  > eps:
+    //     cArr.append(c)
+    //     Jx = math.fsum([2 * (x[k] - c[0]) * (Ri[k] - Rm) / Ri[k] for k in range(len(Ri))])
+    //     Jy = math.fsum([2 * (y[k] - c[1]) * (Ri[k] - Rm) / Ri[k] for k in range(len(Ri))])
+    //     Jz = math.fsum([2 * (z[k] - c[2]) * (Ri[k] - Rm) / Ri[k] for k in range(len(Ri))])
+    //     gradJ = [Jx, Jy, Jz] # find gradient
+    //     c = [c[k] + alpha * gradJ[k] for k in range(len(c)) if len(c) == len(gradJ)] # find new centre point
+    //     Ri = [Point(*c).distance(Point(*pnts[k])) for k in range(len(pnts))] # calculate new radii
+    //     RmOld = Rm
+    //     Rm = math.fsum(Ri) / len(Ri) # calculate new mean radius
+    //     dR = abs(Rm - RmOld) # new difference between mean radii
+    //
+    // return Point(*c), Rm
+
+    let turn_radius = 1.; //meters
+    let speed = 1.;
+
+    // todo: This should points towards the center of the circle; in the plane of rotation.
+    let acc_direction = Vec3::new_zero();
+
+    acc_direction * speed * 2. * turn_radius
 }

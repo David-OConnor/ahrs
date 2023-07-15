@@ -17,6 +17,7 @@ mod mag;
 mod mag_ellipsoid_fitting;
 pub mod params;
 pub mod ppks;
+// mod filter;
 
 pub use crate::{attitude::Ahrs, params::Params};
 
@@ -42,6 +43,8 @@ use defmt::println;
 // http://www.iri.upc.edu/people/jsola/JoanSola/objectes/notes/kinematics.pdf
 
 pub const G: f32 = 9.80665; // Gravity, in m/s^2
+
+pub const DEG_SCALE_1E8: f32 = 100_000_000.;
 
 pub const UP: Vec3 = Vec3 {
     x: 0.,
@@ -78,7 +81,7 @@ impl Default for FixType {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 /// In a format conducive to being parsed from the UBX PVT. (`UBX-NAV-PVT`)
 /// Note: For position and elevation, we use the same units as Ublox reports; we
 /// can convert to floats as required downstream.
