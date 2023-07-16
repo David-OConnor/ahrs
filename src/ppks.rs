@@ -71,7 +71,6 @@ impl PositFused {
 
         let elevation_msl = gnss_dr.elevation_msl + add_to_gnss.elevation_msl;
 
-        // todo: Qc
         let elevation_hae = (fix.elevation_hae as f32 / 1_000.)
             + (elevation_msl - (fix.elevation_msl as f32 / 1_000.));
 

@@ -86,6 +86,8 @@ pub struct AhrsConfig {
     pub mag_cal_portion_req: f32,
     /// A value of 1.0 means new mag cals replace the prev. 0.5 means an average.
     pub mag_cal_update_amt: f32,
+    /// In seconds. If the most recent fix is older than this, don't use it.
+    pub max_fix_age_lin_acc: f32,
 }
 
 impl Default for AhrsConfig {
@@ -109,6 +111,7 @@ impl Default for AhrsConfig {
             update_ratio_mag_cal_log: 160,
             mag_cal_portion_req: 0.90,
             mag_cal_update_amt: 0.3,
+            max_fix_age_lin_acc: 0.5,
         }
     }
 }
@@ -228,6 +231,9 @@ pub struct Ahrs {
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
     pub(crate) mag_declination: f32,
+    /// Linear acceleration as determined by the GNSS. Note that we get these updates much more
+    /// seldom than INS updates; store until ready to use
+    lin_acc_gnss: Option<Vec3>,
     /// We use this location for updating linear acceleration using GNSS
     /// todo: You may need a list of several to use the arc-radius approach.
     pub(crate) fix_prev: Option<Fix>,
@@ -294,6 +300,24 @@ impl Ahrs {
         // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
         let lin_acc_estimate =
             linear_acc::from_gyro(acc_calibrated, att_fused, self.cal.acc_len_at_rest);
+
+        if let Some(lin_acc_gnss) = self.lin_acc_gnss {
+            if let Some(fix) = &self.fix_prev {
+                // todo: Put back once you figure out how to compare current time to this.
+                if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
+                    self.lin_acc_gnss = None;
+                } else {
+                    println!(
+                        "Lin acc GNSS: x{} y{} z{} mag{}",
+                        lin_acc_gnss.x,
+                        lin_acc_gnss.y,
+                        lin_acc_gnss.z,
+                        lin_acc_gnss.magnitude()
+                    );
+                    // todo: Here etc, include your fusing with gyro lin acc estimate.
+                }
+            }
+        }
 
         // let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
@@ -386,8 +410,8 @@ impl Ahrs {
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
-        if unsafe { I } % 1000 == 0 {
-            // if false {
+        // if unsafe { I } % 1000 == 0 {
+        if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             // let euler = self.attitude.to_euler();
@@ -403,6 +427,34 @@ impl Ahrs {
                 gyro_data.x, gyro_data.y, gyro_data.z,
             );
 
+            println!(
+                "Gyro cal: x{} y{} z{}\n",
+                gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
+            );
+
+            println!(
+                "Acc cal x{} y{} z{}",
+                acc_calibrated.x, acc_calibrated.y, acc_calibrated.z
+            );
+
+            println!(
+                "\nLin acc: x{} y{} z{} mag{}",
+                lin_acc_estimate.x,
+                lin_acc_estimate.y,
+                lin_acc_estimate.z,
+                lin_acc_estimate.magnitude(),
+            );
+
+            if let Some(lin_acc_gnss) = self.lin_acc_gnss {
+                println!(
+                    "\nLin acc: x{} y{} z{} mag{}",
+                    lin_acc_gnss.x,
+                    lin_acc_gnss.y,
+                    lin_acc_gnss.z,
+                    lin_acc_gnss.magnitude(),
+                );
+            }
+
             // println!(
             //     "Acc rate: x{} y{} z{}",
             //     acc_rate_estimate.x, acc_rate_estimate.y, acc_rate_estimate.z,
@@ -416,11 +468,6 @@ impl Ahrs {
             println!(
                 "Acc gyro rate diff: x{} y{} z{}",
                 self.acc_gyro_rate_diff.x, self.acc_gyro_rate_diff.y, self.acc_gyro_rate_diff.z,
-            );
-
-            println!(
-                "Gyro Cal: x{} y{} z{}\n",
-                gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
             );
 
             // println!(
@@ -504,7 +551,9 @@ impl Ahrs {
     /// Update the linear acc estimates and related state from a GNSS fix.
     pub fn update_from_fix(&mut self, fix: &Fix) {
         if let Some(fix_prev) = &self.fix_prev {
-            let lin_acc_gnss = linear_acc::from_gnss(fix, &fix_prev, self.attitude);
+            if fix.timestamp_s - fix_prev.timestamp_s < self.config.max_fix_age_lin_acc {
+                self.lin_acc_gnss = Some(linear_acc::from_gnss(fix, &fix_prev, self.attitude));
+            }
         }
 
         self.fix_prev = Some(fix.clone());
@@ -631,6 +680,7 @@ pub fn heading_from_gnss_acc(gnss_acc_nse: Vec3, acc_lin_imu: Vec3) -> f32 {
     //     gnss_acc_nse.to_normalized()
     // );
 
+    // todo: Does not appear to be working
     let att_from_gnss =
         Quaternion::from_unit_vecs(gnss_acc_nse.to_normalized(), acc_lin_imu.to_normalized());
 

@@ -67,30 +67,10 @@ pub fn from_gyro(
         //     self.cal.linear_acc_bias.x, self.cal.linear_acc_bias.y, self.cal.linear_acc_bias.z,
         // );
 
-        println!(
-            "Lin acc: x{} y{} z{}. mag{}",
-            lin_acc_estimate.x,
-            lin_acc_estimate.y,
-            lin_acc_estimate.z,
-            lin_acc_estimate.magnitude()
-        );
-
         // print_quat(att_diff_rot, "Att diff rot");
         // println!("Att diff rot angle: {}", att_diff_rot.angle());
         let a = grav_axis_from_att_gyro * acc_len_at_rest;
         // println!("Grav axis gyro x{} y{} z{}", a.x, a.y, a.z);
-        println!("Acc x{} y{} z{}", accel_data.x, accel_data.y, accel_data.z);
-        //
-        // println!(
-        //     "Lin: x{} y{} z{}. mag{}",
-        //     lin_acc_estimate.x,
-        //     lin_acc_estimate.y,
-        //     lin_acc_estimate.z,
-        //     lin_acc_estimate.magnitude() // lin_acc_estimate.x,
-        //                                               // lin_acc_estimate.y,
-        //                                               // lin_acc_estimate.z,
-        //                                               // lin_acc_estimate.magnitude()
-        // );
 
         // println!(
         //     "Diff acc gyro: {:?}, gyro grav x{} y{} z{}",
@@ -100,12 +80,6 @@ pub fn from_gyro(
         //     grav_axis_from_att_gyro.z
         // );
     }
-
-    // if unsafe { i } % 100 == 0 {
-    //     if !update_gyro_from_acc {
-    //         println!("Under lin acc");
-    //     }
-    // }
 
     lin_acc_estimate
 }
