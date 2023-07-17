@@ -307,13 +307,16 @@ impl Ahrs {
                 if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
                     self.lin_acc_gnss = None;
                 } else {
-                    println!(
-                        "Lin acc GNSS: x{} y{} z{} mag{}",
-                        lin_acc_gnss.x,
-                        lin_acc_gnss.y,
-                        lin_acc_gnss.z,
-                        lin_acc_gnss.magnitude()
-                    );
+
+                    if unsafe { I } % 1_000 == 0 {
+                        println!(
+                            "Lin acc GNSS: x{} y{} z{} mag{}",
+                            lin_acc_gnss.x,
+                            lin_acc_gnss.y,
+                            lin_acc_gnss.z,
+                            lin_acc_gnss.magnitude()
+                        );
+                    }
                     // todo: Here etc, include your fusing with gyro lin acc estimate.
                 }
             }
@@ -410,8 +413,8 @@ impl Ahrs {
 
         static mut I: u32 = 0;
         unsafe { I += 1 };
-        // if unsafe { I } % 1000 == 0 {
-        if false {
+        if unsafe { I } % 1000 == 0 {
+        // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             // let euler = self.attitude.to_euler();
