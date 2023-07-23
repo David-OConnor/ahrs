@@ -5,9 +5,10 @@
 
 // use crate::{ppks::PositionFused};
 
-use crate::{ppks::PositFused, Ahrs, ImuReadings};
-
+use defmt::println;
 use lin_alg2::f32::{Quaternion, Vec3};
+
+use crate::{ppks::PositFused, Ahrs, ImuReadings};
 
 /// Aircraft flight parameters, at a given instant. Pitch and roll rates are in the aircraft's
 /// frame of reference.
@@ -56,8 +57,6 @@ pub struct Params {
     // pub mag_data: Option<Vec3>,
 }
 
-use defmt::println;
-
 impl Params {
     /// Update params with IMU readings, and attitude. If filtering IMU readings, to so before
     /// running this.
@@ -68,28 +67,60 @@ impl Params {
         ahrs: &mut Ahrs,
         dt: f32,
     ) {
-        let accel_data = Vec3 {
-            x: imu_readings.a_x,
-            y: imu_readings.a_y,
-            z: imu_readings.a_z,
-        };
+        let (accel_data, gyro_data, mag_data) = match ahrs.config.orientation {
+            crate::DeviceOrientation::YFwdXRight => {
+                let accel_data = Vec3 {
+                    x: imu_readings.a_x,
+                    y: imu_readings.a_y,
+                    z: imu_readings.a_z,
+                };
 
-        let gyro_data = Vec3 {
-            x: imu_readings.v_pitch,
-            y: imu_readings.v_roll,
-            z: imu_readings.v_yaw,
-        };
+                let gyro_data = Vec3 {
+                    x: imu_readings.v_pitch,
+                    y: imu_readings.v_roll,
+                    z: imu_readings.v_yaw,
+                };
 
-        // Invert x and y for mag due to the coordinate system it uses.
-        let mag_data = match mag_readings {
-            Some(m) => {
-                Some(Vec3 {
-                    x: -m.x, // negative due to our mag's coord system.
-                    y: -m.y,
-                    z: m.z,
-                })
+                // Invert x and y for mag due to the coordinate system it uses.
+                let mag_data = match mag_readings {
+                    Some(m) => {
+                        Some(Vec3 {
+                            x: -m.x, // negative due to our mag's coord system.
+                            y: -m.y,
+                            z: m.z,
+                        })
+                    }
+                    None => None,
+                };
+
+                (accel_data, gyro_data, mag_data)
             }
-            None => None,
+            crate::DeviceOrientation::YLeftXFwd => {
+                // todo: QC you don't have x and y sign reversed.
+                let accel_data = Vec3 {
+                    x: -imu_readings.a_y,
+                    y: imu_readings.a_x,
+                    z: imu_readings.a_z,
+                };
+
+                let gyro_data = Vec3 {
+                    x: -imu_readings.v_roll,
+                    y: imu_readings.v_pitch,
+                    z: imu_readings.v_yaw,
+                };
+
+                // Invert x and y for mag due to the coordinate system it uses.
+                let mag_data = match mag_readings {
+                    Some(m) => Some(Vec3 {
+                        x: m.y,
+                        y: -m.x,
+                        z: m.z,
+                    }),
+                    None => None,
+                };
+
+                (accel_data, gyro_data, mag_data)
+            }
         };
 
         ahrs.update(gyro_data, accel_data, mag_data);

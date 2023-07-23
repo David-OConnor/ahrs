@@ -62,6 +62,18 @@ pub const RIGHT: Vec3 = Vec3 {
     z: 0.,
 };
 
+#[derive(Clone, Copy)]
+pub enum DeviceOrientation {
+    YFwdXRight,
+    YLeftXFwd,
+}
+
+impl Default for DeviceOrientation {
+    fn default() -> Self {
+        Self::YFwdXRight
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 pub enum FixType {
@@ -145,7 +157,8 @@ impl ImuReadings {
     }
 }
 
-/// Output: m/s^2, or Output: rad/s.
+/// Convert raw accelerometer or gyro readings to their value in SI units, floating point.
+/// Output: m/s^2 for accelerometer; rad/s for gyro.
 pub fn interpret_accel_or_gyro(val: i16, fullscale: f32) -> f32 {
     (val as f32 / i16::MAX as f32) * fullscale
 }

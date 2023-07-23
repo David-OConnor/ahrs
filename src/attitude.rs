@@ -22,7 +22,7 @@ use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 use crate::{
     linear_acc,
     mag_ellipsoid_fitting::{self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES},
-    print_quat, Fix, FORWARD, G, RIGHT, UP,
+    print_quat, DeviceOrientation, Fix, FORWARD, G, RIGHT, UP,
 };
 
 use crate::ppks::PositVelEarthUnits;
@@ -88,6 +88,7 @@ pub struct AhrsConfig {
     pub mag_cal_update_amt: f32,
     /// In seconds. If the most recent fix is older than this, don't use it.
     pub max_fix_age_lin_acc: f32,
+    pub orientation: DeviceOrientation,
 }
 
 impl Default for AhrsConfig {
@@ -109,9 +110,10 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.90,
+            mag_cal_portion_req: 0.99,
             mag_cal_update_amt: 0.3,
             max_fix_age_lin_acc: 0.5,
+            orientation: Default::default(),
         }
     }
 }
@@ -240,17 +242,23 @@ pub struct Ahrs {
     /// Long-term difference between accelerometer and gyro readings. Over long periods of time,
     /// the acc-determined angular rate will be reliable due to the fixed reference of gravity.
     /// We use this to zero-out gyro offsets.
+    /// We use this to track updates
+    pub(crate) num_updates: u32,
     acc_gyro_rate_diff: Vec3,
     /// Timestamp, in seconds.
     timestamp: f32,
 }
 
 impl Ahrs {
-    pub fn new(dt: f32) -> Self {
+    pub fn new(dt: f32, orientation: DeviceOrientation) -> Self {
         Self {
             dt,
             mag_declination: -0.032, // Raleigh
             mag_inclination_estimate: -1.2,
+            config: AhrsConfig {
+                orientation,
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -290,7 +298,7 @@ impl Ahrs {
         // Fuse with mag data if available.
         match mag_data {
             Some(mut mag) => {
-                self.handle_mag(mag, &mut att_fused, heading_fused, unsafe { I });
+                self.handle_mag(mag, &mut att_fused, heading_fused);
             }
             None => {
                 self.recent_dh_mag_dh_gyro = None;
@@ -307,8 +315,7 @@ impl Ahrs {
                 if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
                     self.lin_acc_gnss = None;
                 } else {
-
-                    if unsafe { I } % 1_000 == 0 {
+                    if self.num_updates % ((1. / self.dt) as u32) == 0 {
                         println!(
                             "Lin acc GNSS: x{} y{} z{} mag{}",
                             lin_acc_gnss.x,
@@ -370,7 +377,7 @@ impl Ahrs {
                 self.config.update_amt_att_from_acc * self.dt,
             );
 
-            // if unsafe { I } % 1000 == 0 {
+            // if self.num_updates % ((1. / self.dt) as u32) == 0 {
             if false {
                 print_quat(rot_gyro_to_acc, "Rot to apply");
                 println!("rot angle: {}", rot_gyro_to_acc.angle());
@@ -411,10 +418,12 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        static mut I: u32 = 0;
-        unsafe { I += 1 };
-        if unsafe { I } % 1000 == 0 {
-        // if false {
+        // static mut I: u32 = 0;
+        // unsafe { I += 1 };
+        // if unsafe { I } % 1000 == 0 {
+
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             // let euler = self.attitude.to_euler();
@@ -492,6 +501,8 @@ impl Ahrs {
                 self.recent_dh_mag_dh_gyro.unwrap_or(69.)
             );
         }
+
+        self.num_updates += 1;
     }
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
@@ -686,18 +697,6 @@ pub fn heading_from_gnss_acc(gnss_acc_nse: Vec3, acc_lin_imu: Vec3) -> f32 {
     // todo: Does not appear to be working
     let att_from_gnss =
         Quaternion::from_unit_vecs(gnss_acc_nse.to_normalized(), acc_lin_imu.to_normalized());
-
-    static mut I: u32 = 0;
-    unsafe { I += 1 };
-
-    if unsafe { I } % 10 == 0 {
-        // print_quat(att_from_gnss, "Att from gnss");
-
-        // println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
-    }
-    // println!("Hdg from GNSS: {}", heading_from_att(att_from_gnss));
-
-    // println!("TEST");
 
     heading_from_att(att_from_gnss)
 }

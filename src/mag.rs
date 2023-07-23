@@ -12,14 +12,19 @@ use crate::{
     print_quat, FORWARD, RIGHT, UP,
 };
 
+// todo: Assess mag health using consistency of mag vector len (calibrated). It should be
+// todo close to 1. THrow out readings that aren't close to 1.
+
 use lin_alg2::f32::{Quaternion, Vec3};
 
+use crate::ppks::PositVelEarthUnits;
 use defmt::println;
 
 impl AhrsCal {
     /// Apply the hard and soft iron offsets to our readings.
     pub fn apply_cal_mag(&self, data: Vec3) -> Vec3 {
         // todo: Why this clone?
+        // todo: Temp removing soft iron to TS
         self.soft_iron.clone() * (data - self.hard_iron)
     }
 
@@ -167,7 +172,6 @@ impl Ahrs {
         mag_raw: Vec3,
         att_fused: &mut Quaternion,
         heading_fused: f32,
-        i: u32,
     ) {
         let mag = self.cal.apply_cal_mag(mag_raw);
 
@@ -200,6 +204,8 @@ impl Ahrs {
         let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
         // let heading_mag = heading_from_att(att_mag);
 
+        let heading_mag = mag_norm.x.atan2(mag_norm.y); // todo temp
+
         let heading_diff = -heading_mag - heading_fused;
 
         let rotation = if self.initialized {
@@ -229,7 +235,7 @@ impl Ahrs {
 
                 self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
 
-                if i % 1_000 == 0 {
+                if self.num_updates % ((1. / self.dt) as u32) == 0 {
                     println!(
                         "Dmag: {} Dgyro: {} diff: {}",
                         dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro
@@ -250,12 +256,12 @@ impl Ahrs {
 
         self.heading_mag = Some(heading_mag);
 
-        self.estimate_mag_inclination(mag_earth_ref, i);
+        self.estimate_mag_inclination(mag_earth_ref);
 
-        if i % 1000 == 0 {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
             // if false {
             //     println!(
-            //         "\n\nMag norm: x{} y{} z{} len{}",
+            //         "\n\nMag: x{} y{} z{} len{}",
             //         mag_norm.x,
             //         mag_norm.y,
             //         mag_norm.z,
@@ -265,13 +271,13 @@ impl Ahrs {
             // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
 
-            // println!(
-            //     "\n\nMag raw: x{} y{} z{} len{}",
-            //     mag_raw.x,
-            //     mag_raw.y,
-            //     mag_raw.z,
-            //     mag_raw.magnitude()
-            // );
+            println!(
+                "\n\nMag raw: x{} y{} z{} len{}",
+                mag_raw.x,
+                mag_raw.y,
+                mag_raw.z,
+                mag_raw.magnitude()
+            );
 
             // println!(
             //     "\n\nMag raw norm: x{} y{} z{}",
@@ -280,13 +286,13 @@ impl Ahrs {
             //     mag_raw.to_normalized().z,
             // );
 
-            // println!(
-            //     "Mag: x{} y{} z{} len{}",
-            //     mag.x,
-            //     mag.y,
-            //     mag.z,
-            //     mag.magnitude()
-            // );
+            println!(
+                "Mag: x{} y{} z{} len{}",
+                mag.x,
+                mag.y,
+                mag.z,
+                mag.magnitude()
+            );
 
             // println!("Estimated mag incl Cum: {}", self.mag_inclination_estimate);
 
@@ -306,7 +312,7 @@ impl Ahrs {
             println!("Heading mag: {}", heading_mag);
         }
 
-        if i % self.config.update_ratio_mag_cal_log as u32 == 0 {
+        if self.num_updates % self.config.update_ratio_mag_cal_log as u32 == 0 {
             self.cal.log_mag_cal_pt(self.attitude, mag_raw);
 
             // If we've filled up most of our sample slots, divided by directional category, initiate cal.
@@ -354,7 +360,7 @@ impl Ahrs {
 
     /// Estimate magnetic inclination. The returned value is in readians, down from
     /// the horizon.
-    fn estimate_mag_inclination(&mut self, mag_earth_ref: Vec3, i: u32) {
+    fn estimate_mag_inclination(&mut self, mag_earth_ref: Vec3) {
         // todo: Inclination will be tracked and modified; not set independently every time.
         let mag_on_fwd_plane = mag_earth_ref.project_to_plane(RIGHT);
 
@@ -363,7 +369,7 @@ impl Ahrs {
         let inclination_estimate = -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
 
         // No need to update the ratio each time.
-        if i % self.config.update_ratio_mag_incl as u32 == 0 {
+        if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {
             if self.initialized {
                 // Weighted average of current inclination estimate with stored.
                 let incl_ratio = self.config.update_amt_mag_incl_estimate
@@ -410,6 +416,7 @@ pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
     // let mag_earth_ref = att_without_heading.rotate_vec(mag_norm);
 
     // let mag_heading = (3. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
+    // let mag_heading = (1. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
     let mag_heading = (1. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
     mag_heading + declination
 
@@ -428,11 +435,8 @@ pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
     // }
 }
 
-// Let's look at a different approach to mag calibration; from first principles.
-/// It's important to note that this calibration procedure is best performed iteratively,
-/// or with a known good starting point. This is due to rotations around the gravitational axis
-/// being from gyroscope readings unless mag data is good.
-/// `cal_map` contains averaged magenetometer readings taken
-fn apply_mag_cal(mag_data: Vec3, attitude: Quaternion, cal_map: &[(Quaternion, Vec3)]) -> Vec3 {
-    Vec3::new_zero()
+/// todo: Put this in a separate module A/R
+/// Estimate magnetic inclination, by looking up from a table based on geographic position.
+fn declination_from_posit(lat_e8: i64, lon_e8: i64) -> f32 {
+    0.
 }
