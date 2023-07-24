@@ -266,13 +266,14 @@ impl Ahrs {
     fn aligning(&self) -> bool {
         self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
     }
 
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         let acc_calibrated = self.cal.apply_cal_acc(accel_data);
-        let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+        // let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+        let gyro_calibrated = gyro_data; // todo: Getting errors on calibrated gyro.
 
         // todo: FIgure out what here should have IIR lowpass filters aplied.
 
@@ -286,6 +287,10 @@ impl Ahrs {
         self.att_from_acc = att_acc;
 
         let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
+
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        //     print_quat(att_fused, "\n\nAtt fused early");
+        // }
 
         let heading_fused = heading_from_att(att_fused);
 
@@ -364,7 +369,6 @@ impl Ahrs {
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
 
         if update_gyro_from_acc {
-            // println!("TRUE");
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
             // much linear acceleration.
             // This rotation is heading-invariant: Rotate the gyro *up* towards the acc *up*.
@@ -384,6 +388,7 @@ impl Ahrs {
             }
 
             att_fused = rot_acc_correction * att_fused;
+
         }
 
         // These variables here are only used to inspect and debug.
@@ -418,16 +423,9 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        // static mut I: u32 = 0;
-        // unsafe { I += 1 };
-        // if unsafe { I } % 1000 == 0 {
-
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
         if false {
             // println!("Alignment: {}", acc_gyro_alignment);
-
-            // let euler = self.attitude.to_euler();
-            // println!("Euler: p{} r{} y{}", euler.pitch, euler.roll, euler.yaw);
 
             print_quat(self.attitude, "\n\nAtt fused");
 
@@ -520,7 +518,7 @@ impl Ahrs {
 
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
