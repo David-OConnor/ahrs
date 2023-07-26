@@ -145,6 +145,8 @@ pub struct AhrsCal {
     acc_len_at_rest: f32,
     /// Used when aligning.
     acc_len_cum: f32,
+    gyro_bias_eval_cum: Vec3,
+    gyro_bias_eval_num_readings: u32,
 }
 
 impl Default for AhrsCal {
@@ -167,6 +169,8 @@ impl Default for AhrsCal {
             mag_sample_count_fwd: Default::default(),
             acc_len_cum: 0.,
             acc_len_at_rest: G,
+            gyro_bias_eval_cum: Vec3::new_zero(),
+            gyro_bias_eval_num_readings: 0,
         }
     }
 }
@@ -266,14 +270,13 @@ impl Ahrs {
     fn aligning(&self) -> bool {
         self.timestamp > self.config.start_alignment_time as f32
             && self.timestamp
-            < (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                < (self.config.start_alignment_time + self.config.alignment_duration) as f32
     }
 
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         let acc_calibrated = self.cal.apply_cal_acc(accel_data);
-        // let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
-        let gyro_calibrated = gyro_data; // todo: Getting errors on calibrated gyro.
+        let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
 
         // todo: FIgure out what here should have IIR lowpass filters aplied.
 
@@ -388,7 +391,6 @@ impl Ahrs {
             }
 
             att_fused = rot_acc_correction * att_fused;
-
         }
 
         // These variables here are only used to inspect and debug.
@@ -398,9 +400,28 @@ impl Ahrs {
         // Note that we are only updating gyro biases if under relatively low linear acceleration. We use
         // a lower threshold than the gyro-updates algorithm above, since we don't need to update biases often,
         // so can afford to be pickier.
-        if lin_acc_estimate.magnitude() < self.config.lin_acc_thresh / 2. {
-            (acc_rate_estimate, acc_gyro_rate_diff) =
-                self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
+        // if lin_acc_estimate.magnitude() < self.config.lin_acc_thresh / 2. {
+        //     (acc_rate_estimate, acc_gyro_rate_diff) =
+        //         self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
+        // }
+
+        // todo: Put this in a fn. (gyro bias estimation at init/rest)
+        // todo: Try a simpler gyro bias update here
+        // todo: Config vals for these.
+        // The lower bound here is to avoid oscillations from physically plugging in the device.
+        let min_bias_time = 1.;
+        let max_bias_time = 6.;
+        let max_bias_val = 0.05; // todo: Adjust this A/R.
+
+        if self.timestamp > min_bias_time
+            && self.timestamp < max_bias_time
+            && gyro_data.mag() < max_bias_val
+        {
+            self.cal.gyro_bias_eval_cum += gyro_data;
+            self.cal.gyro_bias_eval_num_readings += 1;
+        } else if self.timestamp > max_bias_time {
+            self.cal.gyro_bias =
+                self.cal.gyro_bias_eval_cum / self.cal.gyro_bias_eval_num_readings as f32;
         }
 
         // todo: Updating regardless of linear acc??
@@ -518,7 +539,7 @@ impl Ahrs {
 
         if self.cal.linear_acc_bias == Vec3::new_zero()
             && self.timestamp
-            > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
         {
             self.cal.linear_acc_bias =
                 self.cal.linear_acc_cum / self.config.alignment_duration as f32;
@@ -538,7 +559,7 @@ impl Ahrs {
         att_acc: Quaternion,
         att_from_acc_prev: Quaternion,
     ) -> (Vec3, Vec3) {
-        let d_att_acc = att_acc * att_from_acc_prev.inverse();
+        let d_att_acc = att_acc / att_from_acc_prev;
         let d_att_axes = d_att_acc.to_axes();
 
         // We notice that, at least when there is little linear acc, this value bounces around
