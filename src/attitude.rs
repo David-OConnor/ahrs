@@ -415,7 +415,7 @@ impl Ahrs {
 
         if self.timestamp > min_bias_time
             && self.timestamp < max_bias_time
-            && gyro_data.mag() < max_bias_val
+            && gyro_data.magnitude() < max_bias_val
         {
             self.cal.gyro_bias_eval_cum += gyro_data;
             self.cal.gyro_bias_eval_num_readings += 1;
