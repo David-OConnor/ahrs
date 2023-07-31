@@ -33,9 +33,9 @@ pub struct AhrsConfig {
     pub lin_bias_lookback: f32,
     /// Look back time, in seconds. of mag heading change rate vice gyro heading change rate
     pub mag_diff_lookback: f32,
-    /// Difference, in radians/s between mag and gyro heading change. Used to assess if we should
-    /// update the gyro heading from the mag.
-    pub mag_gyro_diff_thresh: f32,
+    // /// Difference, in radians/s between mag and gyro heading change. Used to assess if we should
+    // /// update the gyro heading from the mag.
+    // pub mag_gyro_diff_thresh: f32,
     /// This value affects how much pitch and roll from the accelerometer are used to
     /// update the gyro. A higher value means more of an update. If this value is 0, the gyro
     /// will not be updated from the acc. If it x dt is 1., the gyro will be synchronized
@@ -54,7 +54,7 @@ pub struct AhrsConfig {
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
     /// and the acc readings are noisy, but stable over time.
     pub update_amt_gyro_bias_from_acc: f32,
-    pub update_amt_mag_heading: f32,
+    // pub update_amt_mag_heading: f32,
     // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
     // /// G x these values (low, high).
     // /// todo: Alternative: Adjust adjustment-towards-acc weight value based on this, vice
@@ -101,11 +101,11 @@ impl Default for AhrsConfig {
         Self {
             lin_bias_lookback: 10.,
             mag_diff_lookback: 10.,
-            mag_gyro_diff_thresh: 0.01,
+            // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
             update_amt_att_from_mag: 15., // todo: Probably much lower; experimenting.
             update_amt_gyro_bias_from_acc: 0.10,
-            update_amt_mag_heading: 0.1,
+            // update_amt_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
             total_mag_thresh: 0.1,   // rel to 1
@@ -227,14 +227,14 @@ pub struct Ahrs {
     pub(crate) mag_calibrated: Option<Vec3>,
     /// We use these to stored headings to track magnetometer health over time.
     pub(crate) heading_mag: Option<f32>,
-    pub(crate) heading_gyro: f32,
+    // pub(crate) heading_gyro: f32,
     // /// Estimatated angular rates from the accelerometer-based attitude.
     // pub(crate) acc_rate_estimate: Vec3,
     // linear_acc_confidence: f32, // todo?
-    /// Track recent changing in mag heading, per change in gyro heading, in degrees.
-    /// We use this to assess magnetometer health, ie if it's being interfered with.
-    /// This is `None` if there are no mag reading provided.
-    pub(crate) recent_dh_mag_dh_gyro: Option<f32>,
+    // /// Track recent changing in mag heading, per change in gyro heading, in degrees.
+    // /// We use this to assess magnetometer health, ie if it's being interfered with.
+    // /// This is `None` if there are no mag reading provided.
+    // pub(crate) recent_dh_mag_dh_gyro: Option<f32>,
     /// Use our gyro/acc fused attitude to estimate magnetic inclination.
     pub(crate) mag_inclination_estimate: f32,
     // mag_cal_in_progress: bool,
@@ -280,49 +280,25 @@ impl Ahrs {
                 < (self.config.start_alignment_time + self.config.alignment_duration) as f32
     }
 
-    /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
-    pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
-        let acc_calibrated = self.cal.apply_cal_acc(accel_data);
-        let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+    fn handle_acc(&mut self, acc_raw: Vec3, att_fused: &mut Quaternion) {
+        let acc = self.cal.apply_cal_acc(acc_raw);
+        self.acc_calibrated = acc;
 
-        // todo: FIgure out what here should have IIR lowpass filters aplied.
-
-        let accel_norm = acc_calibrated.to_normalized();
+        let accel_norm = acc.to_normalized();
 
         // Estimate attitude from raw accelerometer and gyro data. Note that
         // The gyro data reguarly receives updates from the acc and mag.
         let att_acc = att_from_accel(accel_norm);
-
-        let att_acc_prev = self.att_from_acc;
         self.att_from_acc = att_acc;
-
-        let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
-
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        //     print_quat(att_fused, "\n\nAtt fused early");
-        // }
-
-        let heading_fused = heading_from_att(att_fused);
 
         // See comment on the `initialized` field.
         // We update initialized state at the end of this function, since other steps rely on it.
         if !self.initialized {
-            att_fused = att_acc;
-        }
-
-        // Fuse with mag data if available.
-        match mag_data {
-            Some(mut mag) => {
-                self.handle_mag(mag, &mut att_fused, heading_fused);
-            }
-            None => {
-                self.recent_dh_mag_dh_gyro = None;
-            }
+            *att_fused = att_acc;
         }
 
         // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
-        let lin_acc_estimate =
-            linear_acc::from_gyro(acc_calibrated, att_fused, self.cal.acc_len_at_rest);
+        let lin_acc_estimate = linear_acc::from_gyro(acc, *att_fused, self.cal.acc_len_at_rest);
 
         if let Some(lin_acc_gnss) = self.lin_acc_gnss {
             if let Some(fix) = &self.fix_prev {
@@ -357,9 +333,7 @@ impl Ahrs {
         // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
         let mut update_gyro_from_acc = false;
         // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
-        if (acc_calibrated.magnitude() - self.cal.acc_len_at_rest).abs()
-            < self.config.total_accel_thresh
-        {
+        if (acc.magnitude() - self.cal.acc_len_at_rest).abs() < self.config.total_accel_thresh {
             // We guess no linear acc since we're getting close to 1G. Note that
             // this will produce false positives in some cases.
             update_gyro_from_acc = true;
@@ -368,12 +342,11 @@ impl Ahrs {
             update_gyro_from_acc = true;
         }
 
-        let att_acc_w_lin_removed =
-            att_from_accel((acc_calibrated - lin_acc_estimate).to_normalized());
+        let att_acc_w_lin_removed = att_from_accel((acc - lin_acc_estimate).to_normalized());
 
         // Make sure we update heading_gyro after mag handling; we use it to diff gyro heading.
         // todo: Remove `heading_gyro` if you end up not using it.
-        self.heading_gyro = heading_fused;
+        // self.heading_gyro = heading_fused;
 
         // todo: Instead of a binary update-or-not, consider weighing the slerp value based
         // todo on how much lin acc we assess, or how much uncertainly in lin acc.
@@ -396,7 +369,40 @@ impl Ahrs {
                 println!("rot angle: {}", rot_gyro_to_acc.angle());
             }
 
-            att_fused = rot_acc_correction * att_fused;
+            *att_fused = rot_acc_correction * *att_fused;
+        }
+
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            println!("Acc cal x{} y{} z{}", acc.x, acc.y, acc.z);
+
+            println!(
+                "\nLin acc: x{} y{} z{} mag{}",
+                lin_acc_estimate.x,
+                lin_acc_estimate.y,
+                lin_acc_estimate.z,
+                lin_acc_estimate.magnitude(),
+            );
+        }
+    }
+
+    /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
+    pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
+        let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+
+        let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
+
+        self.handle_acc(accel_data, &mut att_fused);
+
+        // todo: FIgure out what here should have IIR lowpass filters aplied.
+
+        // Fuse with mag data if available.
+        match mag_data {
+            Some(mut mag) => {
+                self.handle_mag(mag, &mut att_fused);
+            }
+            None => {
+                // self.recent_dh_mag_dh_gyro = None;
+            }
         }
 
         // These variables here are only used to inspect and debug.
@@ -430,18 +436,8 @@ impl Ahrs {
                 self.cal.gyro_bias_eval_cum / self.cal.gyro_bias_eval_num_readings as f32;
         }
 
-        // todo: Updating regardless of linear acc??
-        //     (acc_rate_estimate, acc_gyro_rate_diff) =
-        //         self.update_gyro_bias(gyro_data, att_acc, att_acc_prev);
-
-        // todo note: In your current iteration, att fused and att gyro in state are the same.
         self.attitude = att_fused;
 
-        self.att_from_acc = att_acc;
-        // self.att_from_gyros = att_fused; // todo: QC if this is what you want.
-        // self.att_from_gyros = att_gyro;
-
-        self.acc_calibrated = acc_calibrated;
         self.gyro_calibrated = gyro_calibrated;
 
         self.timestamp += self.dt;
@@ -468,29 +464,6 @@ impl Ahrs {
                 "Gyro cal: x{} y{} z{}\n",
                 gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
             );
-
-            println!(
-                "Acc cal x{} y{} z{}",
-                acc_calibrated.x, acc_calibrated.y, acc_calibrated.z
-            );
-
-            println!(
-                "\nLin acc: x{} y{} z{} mag{}",
-                lin_acc_estimate.x,
-                lin_acc_estimate.y,
-                lin_acc_estimate.z,
-                lin_acc_estimate.magnitude(),
-            );
-
-            if let Some(lin_acc_gnss) = self.lin_acc_gnss {
-                println!(
-                    "\nLin acc: x{} y{} z{} mag{}",
-                    lin_acc_gnss.x,
-                    lin_acc_gnss.y,
-                    lin_acc_gnss.z,
-                    lin_acc_gnss.magnitude(),
-                );
-            }
 
             // println!(
             //     "Acc rate: x{} y{} z{}",
@@ -521,10 +494,10 @@ impl Ahrs {
 
             println!("Acc len at rest: {:?}", self.cal.acc_len_at_rest);
 
-            println!(
-                "Hdg diff mag gyro: {}",
-                self.recent_dh_mag_dh_gyro.unwrap_or(69.)
-            );
+            // println!(
+            //     "Hdg diff mag gyro: {}",
+            //     self.recent_dh_mag_dh_gyro.unwrap_or(69.)
+            // );
         }
 
         self.num_updates += 1;

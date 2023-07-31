@@ -167,13 +167,9 @@ impl AhrsCal {
 }
 
 impl Ahrs {
-    pub(crate) fn handle_mag(
-        &mut self,
-        mag_raw: Vec3,
-        att_fused: &mut Quaternion,
-        heading_fused: f32,
-    ) {
+    pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, att_fused: &mut Quaternion) {
         let mag = self.cal.apply_cal_mag(mag_raw);
+        self.mag_calibrated = Some(mag);
 
         const EPS: f32 = 0.0000001;
         if mag.x.abs() < EPS && mag.y.abs() < EPS && mag.z.abs() < EPS {
@@ -183,14 +179,16 @@ impl Ahrs {
 
         let mag_norm = mag.to_normalized();
 
-        // We use attitude from the accelerometer only here, to eliminate any
-        // Z-axis component
-        // todo: This is wrong. You need to find the angle only in the relevant plane.
-        // let mag_earth_ref = self.att_from_acc.inverse().rotate_vec(mag_norm);
-        // let mag_earth_ref = self.att_from_acc.rotate_vec(mag_norm);
+        let incl_rot = Quaternion::from_axis_angle(RIGHT, self.mag_inclination_estimate);
+        let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
 
-        let att_mag = att_from_mag(mag_norm, self.mag_inclination_estimate); // todo: Self.incl estimate
+        let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
+
+        if !self.initialized {
+            // todo: Rotate around Up, taking the whole mag heading into account. (And nothing else)
+            // att_fused = att_acc;
+        }
 
         // Symmetry with acc here; similar logic etc.
         // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
@@ -204,11 +202,7 @@ impl Ahrs {
         if update_gyro_from_mag {
             // See notes in the similar section for acc.
 
-            // todo: This mag vec finding is DRY with `att_from_mag`.
-            let incl_rot = Quaternion::from_axis_angle(RIGHT, self.mag_inclination_estimate);
-            let mag_field_vec = incl_rot.rotate_vec(FORWARD);
-
-            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_vec);
+            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_absolute);
 
             let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
 
@@ -217,70 +211,7 @@ impl Ahrs {
                 self.config.update_amt_att_from_mag * self.dt,
             );
 
-            // todo: QC the interaction between this and the acc update.
-            self.attitude = rot_mag_correction * self.attitude;
-        }
-
-        // todo: Remove in favor of the new, symmetric approach, if that demonstrates workign
-        if false {
-            // // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
-            // // todo under linear accel.
-            // // let heading_mag = heading_from_mag(mag_norm, att_acc);
-            // let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
-            // // let heading_mag = heading_from_att(att_mag);
-
-            // let heading_mag = mag_norm.x.atan2(mag_norm.y); // todo temp
-
-            // let heading_diff = -heading_mag - heading_fused;
-
-            // let rotation = if self.initialized {
-            //     // Accept the whole magnetometer update.
-            //     Quaternion::from_axis_angle(UP, heading_diff)
-            // } else {
-            //     // Nudge the heading in the direction of the gyro.
-            //     Quaternion::from_axis_angle(
-            //         UP,
-            //         heading_diff * self.config.update_amt_mag_heading * self.dt,
-            //     )
-            // };
-
-            // // todo: Put back.
-            // // *att_fused = rotation * *att_fused;
-
-            // // Assess magnetometer health by its comparison in rate change compared to the gyro.
-            // match self.heading_mag {
-            //     Some(heading_mag_prev) => {
-            //         // todo: Find avg over many readings.
-            //         // todo: Since even a messed up mag seems to show constant readings
-            //         // todo when there is no rotation, consider only logging values here if
-            //         // todo dh/dt exceeds a certain value.
-
-            //         let dmag_dt = (heading_mag - heading_mag_prev) / self.dt;
-            //         let dgyro_dt = (heading_fused - self.heading_gyro) / self.dt;
-
-            //         self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
-
-            //         if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            //             println!(
-            //                 "Dmag: {} Dgyro: {} diff: {}",
-            //                 dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro
-            //             );
-            //         }
-
-            //         // Fuse heading from gyro with heading from mag.
-            //         if self.recent_dh_mag_dh_gyro.unwrap().abs() < self.config.mag_gyro_diff_thresh
-            //         {
-            //             // heading_fused = (heading_prev * gyro_heading_weight + heading_mag * mag_heading_weight) / 2.;
-            //         }
-            //     }
-            //     None => {
-            //         self.recent_dh_mag_dh_gyro = None;
-            //     }
-            // }
-
-            // // todo: For now, we are using mag only for the heading.
-
-            // self.heading_mag = Some(heading_mag);
+            *att_fused = rot_mag_correction * *att_fused;
         }
 
         // todo: Re-examine.
@@ -409,14 +340,10 @@ impl Ahrs {
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
 /// interference, and is noisy in general. Apply calibration prior to this step.
-/// Inclination is in radians.
-pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
-    // `mag_field_vec` points towards magnetic earth, and into the earth IOC inlination.
-
-    let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
-    let mag_field_vec = incl_rot.rotate_vec(FORWARD);
-
-    Quaternion::from_unit_vecs(mag_field_vec, mag_norm)
+/// The magnetic field vector points points towards magnetic earth, and into the earth IOC inlination.
+/// It is points forward and down in our coordinate system.
+pub fn att_from_mag(mag_norm: Vec3, mag_field_vec_absolute: Vec3) -> Quaternion {
+    Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm)
 }
 
 /// Calculate heading, in radians, from the magnetometer's X and Y axes.
