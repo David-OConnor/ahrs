@@ -25,9 +25,6 @@ use crate::{
 pub struct AhrsConfig {
     /// How far to look back when determining linear acceleration bias from cumulative values. In seconds.
     pub lin_bias_lookback: f32,
-    // /// Difference, in radians/s between mag and gyro heading change. Used to assess if we should
-    // /// update the gyro heading from the mag.
-    // pub mag_gyro_diff_thresh: f32,
     /// This value affects how much pitch and roll from the accelerometer are used to
     /// update the gyro. A higher value means more of an update. If this value is 0, the gyro
     /// will not be updated from the acc. If it x dt is 1., the gyro will be synchronized
@@ -46,12 +43,6 @@ pub struct AhrsConfig {
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
     /// and the acc readings are noisy, but stable over time.
     pub update_amt_gyro_bias_from_acc: f32,
-    // pub update_amt_mag_heading: f32,
-    // /// Assume there's minimal linear acceleration if accelerometer magnitude falls between
-    // /// G x these values (low, high).
-    // /// todo: Alternative: Adjust adjustment-towards-acc weight value based on this, vice
-    // /// todo updating or not.
-    // pub acc_mag_threshold_no_lin: (f32, f32),
     /// If total acclerometer reading is within this value of G, update gyro from acc.
     pub total_accel_thresh: f32, // m/s^2
     /// Similar function as for acc, but comparing to 1. (Our ideal magnetometer magnitude
@@ -96,19 +87,16 @@ impl Default for AhrsConfig {
             update_amt_att_from_acc: 3.,
             update_amt_att_from_mag: 15., // todo: Probably much lower; experimenting.
             update_amt_gyro_bias_from_acc: 0.10,
-            // update_amt_mag_heading: 0.1,
-            // acc_mag_threshold_no_lin: (0.8, 1.2),
-            total_accel_thresh: 0.4, // m/s^2
-            total_mag_thresh: 0.2,   // rel to 1
+            total_accel_thresh: 1.0, // m/s^2
+            total_mag_thresh: 0.3,   // rel to 1
             lin_acc_thresh: 0.3,     // m/s^2
-            // calibration: Default::default(),
             start_alignment_time: 2,
             alignment_duration: 2,
             mag_cal_timestep: 0.05,
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.9,
+            mag_cal_portion_req: 0.85,
             mag_cal_update_amt: 0.3,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
@@ -242,6 +230,7 @@ pub struct Ahrs {
     /// Timestamp, in seconds.
     pub(crate) timestamp: f32,
     acc_gyro_rate_diff: Vec3,
+    gyro_bias_complete: bool,
 }
 
 impl Ahrs {
@@ -249,7 +238,7 @@ impl Ahrs {
         Self {
             dt,
             mag_declination: -0.032, // Raleigh
-            mag_inclination_estimate: -1.2,
+            mag_inclination_estimate: 1.2,
             config: AhrsConfig {
                 orientation,
                 ..Default::default()
@@ -267,6 +256,7 @@ impl Ahrs {
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
+        self.gyro_calibrated = gyro_calibrated;
 
         let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
 
@@ -306,13 +296,15 @@ impl Ahrs {
             self.cal.gyro_bias_eval_cum += gyro_data;
             self.cal.gyro_bias_eval_num_readings += 1;
         } else if self.timestamp > max_bias_time {
-            self.cal.gyro_bias =
-                self.cal.gyro_bias_eval_cum / self.cal.gyro_bias_eval_num_readings as f32;
+            if self.cal.gyro_bias_eval_num_readings > 0 && !self.gyro_bias_complete {
+                self.cal.gyro_bias =
+                    self.cal.gyro_bias_eval_cum / self.cal.gyro_bias_eval_num_readings as f32;
+
+                self.gyro_bias_complete = true;
+            }
         }
 
         self.attitude = att_fused;
-
-        self.gyro_calibrated = gyro_calibrated;
 
         self.timestamp += self.dt;
 
@@ -349,10 +341,10 @@ impl Ahrs {
             //     acc_gyro_rate_diff.x, acc_gyro_rate_diff.y, acc_gyro_rate_diff.z,
             // );
 
-            println!(
-                "Acc gyro rate diff: x{} y{} z{}",
-                self.acc_gyro_rate_diff.x, self.acc_gyro_rate_diff.y, self.acc_gyro_rate_diff.z,
-            );
+            // println!(
+            //     "Acc gyro rate diff: x{} y{} z{}",
+            //     self.acc_gyro_rate_diff.x, self.acc_gyro_rate_diff.y, self.acc_gyro_rate_diff.z,
+            // );
 
             // println!(
             //     "Acc: x{} y{} z{} mag{}",

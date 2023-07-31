@@ -165,8 +165,11 @@ impl Ahrs {
 
         let mag_norm = mag.to_normalized();
 
-        let incl_rot = Quaternion::from_axis_angle(RIGHT, self.mag_inclination_estimate);
+        let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
         let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
+
+        // println!("Mag field abs: {:?} {} {}", mag_field_absolute.x, mag_field_absolute.y, mag_field_absolute.z);
+        // println!("Mag norm: {:?} {} {}", mag_norm.x, mag_norm.y, mag_norm.z);
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
@@ -252,31 +255,6 @@ impl Ahrs {
                 self.cal.update_mag_cal(self.config.mag_cal_update_amt);
             }
         }
-
-        // static mut MAG_CAL_PRINTED: bool = false;
-        // // todo: use your stored config value, vice this magic 50.
-        // if self.mag_cal_in_progress && i % 100 == 0 {
-        //     let i = MAG_CAL_I.fetch_add(1, Ordering::Relaxed);
-        //
-        //     if i == MAG_CAL_DATA_LEN {
-        //         self.mag_cal_in_progress = false;
-        //     } else {
-        //         self.cal.mag_cal_data[i] = (self.attitude, mag);
-        //     }
-        // }
-        //
-        // unsafe {
-        //     if !self.mag_cal_in_progress && !MAG_CAL_PRINTED {
-        //         println!("\n\n[");
-        //         for data in self.cal.mag_cal_data {
-        //             println!("({}, {}, {}),", data.1.x, data.1.y, data.1.z);
-        //         }
-        //
-        //         println!("\n\n]");
-        //
-        //         MAG_CAL_PRINTED = true;
-        //     }
-        // }
     }
 
     /// Estimate magnetic inclination, by calculating the angle between Up in the aircraft, and the magnetometer
@@ -289,9 +267,6 @@ impl Ahrs {
         // Angle between up and the mag reading. We subtract tau/4 to get angle below the horizon.
         let inclination_estimate = up.dot(mag_norm).acos() - TAU_DIV_4;
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            println!("Inc instantaneous: {:?}", inclination_estimate);
-        }
 
         // No need to update the ratio each time.
         if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {
@@ -304,8 +279,9 @@ impl Ahrs {
                 self.mag_inclination_estimate = self.mag_inclination_estimate * (1. - incl_ratio)
                     + inclination_estimate * incl_ratio
             } else {
+                // todo: Not working. Currently uses the default; should converge reasonably quickly.
                 // Take the full update on the first run.
-                self.mag_inclination_estimate = inclination_estimate;
+                // self.mag_inclination_estimate = inclination_estimate;
             }
         }
     }
