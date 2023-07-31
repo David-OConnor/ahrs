@@ -4,14 +4,6 @@ use core::f32::consts::TAU;
 
 use num_traits::float::Float; // abs etc
 
-use crate::{
-    attitude::{Ahrs, AhrsCal},
-    mag_ellipsoid_fitting::{
-        self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
-    },
-    print_quat, FORWARD, RIGHT, UP,
-};
-
 // todo: Assess mag health using consistency of mag vector len (calibrated). It should be
 // todo close to 1. THrow out readings that aren't close to 1.
 
@@ -19,6 +11,14 @@ use lin_alg2::f32::{Quaternion, Vec3};
 
 use crate::ppks::PositVelEarthUnits;
 use defmt::println;
+
+use crate::{
+    attitude::{Ahrs, AhrsCal},
+    mag_ellipsoid_fitting::{
+        self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
+    },
+    print_quat, FORWARD, RIGHT, UP,
+};
 
 impl AhrsCal {
     /// Apply the hard and soft iron offsets to our readings.
@@ -81,20 +81,6 @@ impl AhrsCal {
                 count[sample_category] += 1;
             }
         }
-
-        // To display status.
-        if false {
-            // todo: You should multiply this by the portion req.
-            let mut num_pts_left = TOTAL_MAG_SAMPLE_PTS;
-            for cat_count in &self.mag_sample_count_up {
-                num_pts_left -= *cat_count as usize;
-            }
-            for cat_count in &self.mag_sample_count_fwd {
-                num_pts_left -= *cat_count as usize;
-            }
-
-            println!("Logging mag pt. Num left: {}", num_pts_left);
-        }
     }
 
     /// Update mag calibration based on sample points.
@@ -148,7 +134,7 @@ impl AhrsCal {
 
         let update_amt_inv = 1. - update_amt;
 
-        self.hard_iron = self.hard_iron.clone() * update_amt_inv + hard_iron * update_amt;
+        self.hard_iron = self.hard_iron * update_amt_inv + hard_iron * update_amt;
         self.soft_iron = self.soft_iron.clone() * update_amt_inv + soft_iron * update_amt;
 
         // todo: Save to flash, but not that this should probably not be done while airborne
@@ -157,8 +143,6 @@ impl AhrsCal {
         // Reset our sample counters. We leave the sample data in place, since we can still
         // use the readings in the next calibration. (Since we initiate cal without completely
         // filling it)
-        // self.mag_cal_data_up = Default::default();
-        // self.mag_cal_data_fwd = Default::default();
         self.mag_sample_i_up = Default::default();
         self.mag_sample_i_fwd = Default::default();
         self.mag_sample_count_up = Default::default();
@@ -186,8 +170,12 @@ impl Ahrs {
         self.att_from_mag = Some(att_mag);
 
         if !self.initialized {
-            // todo: Rotate around Up, taking the whole mag heading into account. (And nothing else)
-            // att_fused = att_acc;
+            let mag_hdg = att_mag.to_axes().2;
+            // todo: Confirm you don' tneed inverse of att, or to just use UP directly.
+            let up_rel_aircraft = att_fused.rotate_vec(UP);
+            let heading_rotation = Quaternion::from_axis_angle(up_rel_aircraft, mag_hdg);
+            *att_fused = heading_rotation * *att_fused;
+            return;
         }
 
         // Symmetry with acc here; similar logic etc.
@@ -214,18 +202,10 @@ impl Ahrs {
             *att_fused = rot_mag_correction * *att_fused;
         }
 
-        // todo: Re-examine.
-        // self.estimate_mag_inclination(mag_earth_ref);
+        self.update_mag_incl(mag_norm);
 
         if self.num_updates % ((1. / self.dt) as u32) == 0 {
             // if false {
-            //     println!(
-            //         "\n\nMag: x{} y{} z{} len{}",
-            //         mag_norm.x,
-            //         mag_norm.y,
-            //         mag_norm.z,
-            //         mag.magnitude()
-            //     );
 
             // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
@@ -238,13 +218,6 @@ impl Ahrs {
                 mag_raw.magnitude()
             );
 
-            // println!(
-            //     "\n\nMag raw norm: x{} y{} z{}",
-            //     mag_raw.to_normalized().x,
-            //     mag_raw.to_normalized().y,
-            //     mag_raw.to_normalized().z,
-            // );
-
             println!(
                 "Mag: x{} y{} z{} len{}",
                 mag.x,
@@ -253,16 +226,9 @@ impl Ahrs {
                 mag.magnitude()
             );
 
-            // println!("Estimated mag incl Cum: {}", self.mag_inclination_estimate);
-
-            // println!(
-            //     "Mag earth: x{} y{} z{}",
-            //     mag_earth_ref.x, mag_earth_ref.y, mag_earth_ref.z
-            // );
+            println!("Estimated mag incl: {}", self.mag_inclination_estimate);
 
             print_quat(att_mag, "Att mag");
-
-            // println!("Heading mag: {}", heading_mag);
         }
 
         if self.num_updates % self.config.update_ratio_mag_cal_log as u32 == 0 {
@@ -311,14 +277,19 @@ impl Ahrs {
         // }
     }
 
-    /// Estimate magnetic inclination. The returned value is in readians, down from
-    /// the horizon.
-    fn estimate_mag_inclination(&mut self, mag_earth_ref: Vec3) {
-        let mag_on_fwd_plane = mag_earth_ref.project_to_plane(RIGHT);
+    /// Estimate magnetic inclination, by calculating the angle between Up in the aircraft, and the magnetometer
+    /// vector. The resulting value is in radians, down from the horizon.
+    fn update_mag_incl(&mut self, mag_norm: Vec3) {
+        const TAU_DIV_4: f32 = TAU / 4.;
 
-        // todo: This is currently heavily-dependent on pitch! Likely due to earth ref being wrong?
-        // Negative since it's a rotation below the horizon.
-        let inclination_estimate = -Quaternion::from_unit_vecs(mag_on_fwd_plane, FORWARD).angle();
+        let up = self.att_from_acc.rotate_vec(UP);
+
+        // Angle between up and the mag reading. We subtract tau/4 to get angle below the horizon.
+        let inclination_estimate = up.dot(mag_norm).acos() - TAU_DIV_4;
+
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            println!("Inc instantaneous: {:?}", inclination_estimate);
+        }
 
         // No need to update the ratio each time.
         if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {
@@ -328,8 +299,8 @@ impl Ahrs {
                     * self.dt
                     * self.config.update_ratio_mag_incl as f32;
 
-                self.mag_inclination_estimate = (self.mag_inclination_estimate * (1. - incl_ratio)
-                    + inclination_estimate * incl_ratio)
+                self.mag_inclination_estimate = self.mag_inclination_estimate * (1. - incl_ratio)
+                    + inclination_estimate * incl_ratio
             } else {
                 // Take the full update on the first run.
                 self.mag_inclination_estimate = inclination_estimate;
@@ -344,36 +315,6 @@ impl Ahrs {
 /// It is points forward and down in our coordinate system.
 pub fn att_from_mag(mag_norm: Vec3, mag_field_vec_absolute: Vec3) -> Quaternion {
     Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm)
-}
-
-/// Calculate heading, in radians, from the magnetometer's X and Y axes.
-// pub fn heading_from_mag(mag_norm: Vec3, att_without_heading: Quaternion) -> f32 {
-pub fn heading_from_mag(mag_earth_ref: Vec3, declination: f32) -> f32 {
-    // todo: Pass in earth ref instead of recomputing earth ref here.
-    // // (mag.y.atan2(mag.x) + TAU/4.) % (TAU / 2.)
-    //
-    // // todo: Inv, or normal?
-    // let mag_earth_ref = att_without_heading.inverse().rotate_vec(mag_norm);
-    // let mag_earth_ref = att_without_heading.rotate_vec(mag_norm);
-
-    // let mag_heading = (3. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
-    // let mag_heading = (1. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
-    let mag_heading = (1. * TAU / 4. - mag_earth_ref.x.atan2(mag_earth_ref.y)) % TAU;
-    mag_heading + declination
-
-    // return TAU / 4. - mag_norm.x.atan2(mag_norm.y);
-
-    // let mag_on_horizontal_plane = mag_earth_ref.project_to_plane(UP);
-    // let rot_to_fwd = Quaternion::from_unit_vecs(mag_on_horizontal_plane, FORWARD);
-    // rot_to_fwd.angle()
-
-    // From Honeywell guide
-    // todo: Is this equiv to atan2?
-    // if mag_earth_ref.y > 0. {
-    //     TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
-    // } else {
-    //     3. * TAU/4. - (mag_earth_ref.x / mag_earth_ref.y).atan()
-    // }
 }
 
 /// todo: Put this in a separate module A/R

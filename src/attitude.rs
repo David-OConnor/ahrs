@@ -8,31 +8,23 @@
 
 // todo: We are currently moving away from the AHRS Fusion port.
 
-use core::{
-    f32::consts::TAU,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-
 use num_traits::float::Float; // abs etc
 
 use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
 
+use defmt::println;
+
 use crate::{
     linear_acc,
-    mag_ellipsoid_fitting::{self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES},
+    mag_ellipsoid_fitting::{MAG_SAMPLES_PER_CAT, SAMPLE_VERTICES},
     print_quat, DeviceOrientation, Fix, FORWARD, G, RIGHT, UP,
 };
-
-use crate::ppks::PositVelEarthUnits;
-use defmt::{println, write};
 
 pub struct AhrsConfig {
     /// How far to look back when determining linear acceleration bias from cumulative values. In seconds.
     pub lin_bias_lookback: f32,
-    /// Look back time, in seconds. of mag heading change rate vice gyro heading change rate
-    pub mag_diff_lookback: f32,
     // /// Difference, in radians/s between mag and gyro heading change. Used to assess if we should
     // /// update the gyro heading from the mag.
     // pub mag_gyro_diff_thresh: f32,
@@ -100,7 +92,6 @@ impl Default for AhrsConfig {
     fn default() -> Self {
         Self {
             lin_bias_lookback: 10.,
-            mag_diff_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
             update_amt_att_from_mag: 15., // todo: Probably much lower; experimenting.
@@ -108,7 +99,7 @@ impl Default for AhrsConfig {
             // update_amt_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
-            total_mag_thresh: 0.1,   // rel to 1
+            total_mag_thresh: 0.2,   // rel to 1
             lin_acc_thresh: 0.3,     // m/s^2
             // calibration: Default::default(),
             start_alignment_time: 2,
@@ -149,7 +140,7 @@ pub struct AhrsCal {
     pub(crate) mag_sample_count_up: [u8; SAMPLE_VERTICES.len()],
     pub(crate) mag_sample_count_fwd: [u8; SAMPLE_VERTICES.len()],
     /// In m/s^2. Used for determining linear acceleration. This should be close to G.
-    acc_len_at_rest: f32,
+    pub(crate) acc_len_at_rest: f32,
     /// Used when aligning.
     acc_len_cum: f32,
     gyro_bias_eval_cum: Vec3,
@@ -189,14 +180,6 @@ impl AhrsCal {
         self.acc_bias.x = acc_data.x;
         self.acc_bias.y = acc_data.y;
         self.acc_bias.z = acc_data.z - G;
-    }
-
-    fn apply_cal_acc(&self, data: Vec3) -> Vec3 {
-        Vec3::new(
-            data.x * self.acc_slope.x - self.acc_bias.x,
-            data.y * self.acc_slope.y - self.acc_bias.y,
-            data.z * self.acc_slope.z - self.acc_bias.z,
-        )
     }
 
     fn apply_cal_gyro(&self, data: Vec3) -> Vec3 {
@@ -246,7 +229,7 @@ pub struct Ahrs {
     pub(crate) mag_declination: f32,
     /// Linear acceleration as determined by the GNSS. Note that we get these updates much more
     /// seldom than INS updates; store until ready to use
-    lin_acc_gnss: Option<Vec3>,
+    pub(crate) lin_acc_gnss: Option<Vec3>,
     /// We use this location for updating linear acceleration using GNSS
     /// todo: You may need a list of several to use the arc-radius approach.
     pub(crate) fix_prev: Option<Fix>,
@@ -255,9 +238,9 @@ pub struct Ahrs {
     /// We use this to zero-out gyro offsets.
     /// We use this to track updates
     pub(crate) num_updates: u32,
-    acc_gyro_rate_diff: Vec3,
     /// Timestamp, in seconds.
-    timestamp: f32,
+    pub(crate) timestamp: f32,
+    acc_gyro_rate_diff: Vec3,
 }
 
 impl Ahrs {
@@ -280,111 +263,6 @@ impl Ahrs {
                 < (self.config.start_alignment_time + self.config.alignment_duration) as f32
     }
 
-    fn handle_acc(&mut self, acc_raw: Vec3, att_fused: &mut Quaternion) {
-        let acc = self.cal.apply_cal_acc(acc_raw);
-        self.acc_calibrated = acc;
-
-        let accel_norm = acc.to_normalized();
-
-        // Estimate attitude from raw accelerometer and gyro data. Note that
-        // The gyro data reguarly receives updates from the acc and mag.
-        let att_acc = att_from_accel(accel_norm);
-        self.att_from_acc = att_acc;
-
-        // See comment on the `initialized` field.
-        // We update initialized state at the end of this function, since other steps rely on it.
-        if !self.initialized {
-            *att_fused = att_acc;
-        }
-
-        // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
-        let lin_acc_estimate = linear_acc::from_gyro(acc, *att_fused, self.cal.acc_len_at_rest);
-
-        if let Some(lin_acc_gnss) = self.lin_acc_gnss {
-            if let Some(fix) = &self.fix_prev {
-                // todo: Put back once you figure out how to compare current time to this.
-                if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
-                    self.lin_acc_gnss = None;
-                } else {
-                    if self.num_updates % ((1. / self.dt) as u32) == 0 {
-                        println!(
-                            "Lin acc GNSS: x{} y{} z{} mag{}",
-                            lin_acc_gnss.x,
-                            lin_acc_gnss.y,
-                            lin_acc_gnss.z,
-                            lin_acc_gnss.magnitude()
-                        );
-                    }
-                    // todo: Here etc, include your fusing with gyro lin acc estimate.
-                }
-            }
-        }
-
-        // let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
-
-        // todo: Rework alignment
-        // self.align(lin_acc_estimate, accel_data);
-
-        // self.linear_acc_estimate = lin_acc_estimate_bias_removed;
-        self.linear_acc_estimate = lin_acc_estimate;
-
-        let lin_acc_estimate_bias_removed = lin_acc_estimate; // todo: For now we removed bias removal
-
-        // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
-        let mut update_gyro_from_acc = false;
-        // If it appears there is negligible linear acceleration, update our gyro readings as appropriate.
-        if (acc.magnitude() - self.cal.acc_len_at_rest).abs() < self.config.total_accel_thresh {
-            // We guess no linear acc since we're getting close to 1G. Note that
-            // this will produce false positives in some cases.
-            update_gyro_from_acc = true;
-        } else if lin_acc_estimate_bias_removed.magnitude() < self.config.lin_acc_thresh {
-            // If not under much acceleration, re-cage our attitude.
-            update_gyro_from_acc = true;
-        }
-
-        let att_acc_w_lin_removed = att_from_accel((acc - lin_acc_estimate).to_normalized());
-
-        // Make sure we update heading_gyro after mag handling; we use it to diff gyro heading.
-        // todo: Remove `heading_gyro` if you end up not using it.
-        // self.heading_gyro = heading_fused;
-
-        // todo: Instead of a binary update-or-not, consider weighing the slerp value based
-        // todo on how much lin acc we assess, or how much uncertainly in lin acc.
-
-        if update_gyro_from_acc {
-            // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
-            // much linear acceleration.
-            // This rotation is heading-invariant: Rotate the gyro *up* towards the acc *up*.
-            let gyro_up = att_fused.rotate_vec(UP);
-            let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
-
-            let rot_acc_correction = Quaternion::new_identity().slerp(
-                rot_gyro_to_acc,
-                self.config.update_amt_att_from_acc * self.dt,
-            );
-
-            // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
-                print_quat(rot_gyro_to_acc, "Rot to apply");
-                println!("rot angle: {}", rot_gyro_to_acc.angle());
-            }
-
-            *att_fused = rot_acc_correction * *att_fused;
-        }
-
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            println!("Acc cal x{} y{} z{}", acc.x, acc.y, acc.z);
-
-            println!(
-                "\nLin acc: x{} y{} z{} mag{}",
-                lin_acc_estimate.x,
-                lin_acc_estimate.y,
-                lin_acc_estimate.z,
-                lin_acc_estimate.magnitude(),
-            );
-        }
-    }
-
     /// Update our AHRS solution given new gyroscope, accelerometer, and mag data.
     pub fn update(&mut self, gyro_data: Vec3, accel_data: Vec3, mag_data: Option<Vec3>) {
         let gyro_calibrated = self.cal.apply_cal_gyro(gyro_data);
@@ -396,18 +274,13 @@ impl Ahrs {
         // todo: FIgure out what here should have IIR lowpass filters aplied.
 
         // Fuse with mag data if available.
-        match mag_data {
-            Some(mut mag) => {
-                self.handle_mag(mag, &mut att_fused);
-            }
-            None => {
-                // self.recent_dh_mag_dh_gyro = None;
-            }
+        if let Some(mag) = mag_data {
+            self.handle_mag(mag, &mut att_fused);
         }
 
         // These variables here are only used to inspect and debug.
-        let mut acc_rate_estimate = Vec3::new_zero();
-        let mut acc_gyro_rate_diff = Vec3::new_zero();
+        // let mut acc_rate_estimate = Vec3::new_zero();
+        // let mut acc_gyro_rate_diff = Vec3::new_zero();
 
         // Note that we are only updating gyro biases if under relatively low linear acceleration. We use
         // a lower threshold than the gyro-updates algorithm above, since we don't need to update biases often,
@@ -532,7 +405,7 @@ impl Ahrs {
     /// Update gyro bias from accelerometer-determined angular rate.
     /// Returns the rate estimate from accelerometer, and the instantaneous difference from
     /// gyro rate, for use in inspection and debugging.
-    fn update_gyro_bias(
+    fn _update_gyro_bias(
         &mut self,
         gyro_raw: Vec3,
         att_acc: Quaternion,
@@ -564,22 +437,14 @@ impl Ahrs {
     pub fn update_from_fix(&mut self, fix: &Fix) {
         if let Some(fix_prev) = &self.fix_prev {
             if fix.timestamp_s - fix_prev.timestamp_s < self.config.max_fix_age_lin_acc {
-                self.lin_acc_gnss = Some(linear_acc::from_gnss(fix, &fix_prev, self.attitude));
+                self.lin_acc_gnss = Some(linear_acc::from_gnss(fix, fix_prev, self.attitude));
             }
         }
 
         self.fix_prev = Some(fix.clone());
-
         // todo: Perhaps
         // let lin_acc_gnd_track = linear_acc::from_ground_track();
     }
-}
-
-/// Estimate attitude from accelerometer. This will fail when under
-/// linear acceleration. Apply calibration prior to this step.
-/// Uses the previous attitude to rotate along the remaining degree of freedom (heading)
-pub fn att_from_accel(accel_norm: Vec3) -> Quaternion {
-    Quaternion::from_unit_vecs(UP, accel_norm)
 }
 
 /// Estimate attitude from gyroscopes. This will accumulate errors over time.

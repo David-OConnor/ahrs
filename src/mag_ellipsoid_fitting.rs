@@ -13,7 +13,7 @@
 // todo: Good approach, but you may be limited by embedded here on the matrix inverse. Maybe
 // todo loop in nalgebra
 
-use na::{Const, Matrix3, Matrix4, RowVector4, SMatrix, SVector};
+use na::{Matrix3, Matrix4, RowVector4, SMatrix, SVector};
 use nalgebra as na;
 
 use num_traits::Float;
@@ -29,7 +29,7 @@ use defmt::println;
 /// are several points near each of these prior to calibrating.
 /// Dodecahedron vertices.
 /// https://math.fandom.com/wiki/Dodecahedron
-const PHI: f32 = 1.6180339887; // 1/2 + (5/4).sqrt()
+const PHI: f32 = 1.618_034; // 1/2 + (5/4).sqrt()
 
 // todo: If this doesn't compile:
 // use core::cell::OnceCell;
@@ -65,7 +65,7 @@ pub const SAMPLE_VERTICES: [Vec3; 20] = [
 
 // The angular distance between neighboring sample vecs. If a quaternion's *up* vec (We chose this
 // arbitrarily; any vec will do) is closer than this to a sample vec, we group it with that sample vec.
-pub const SAMPLE_VERTEX_ANGLE: f32 = 0.7297276562166872;
+pub const SAMPLE_VERTEX_ANGLE: f32 = 0.729_727_7;
 
 // We need at least this many samples per category before calibrating.
 // Note: We'd ideally like this to be higher, but are experiencing stack overflows eg at 5.
@@ -140,11 +140,9 @@ pub fn ls_ellipsoid(sample_pts: &[Vec3; TOTAL_MAG_SAMPLE_PTS]) -> [f32; 10] {
     // let mut result = [0.; 10];
     // result[0..9].copy_from_slice(ABC[0..9]);
     // result[9] = -1.; // J term
-    let result = [
+    [
         ABC[0], ABC[1], ABC[2], ABC[3], ABC[4], ABC[5], ABC[6], ABC[7], ABC[8], -1.,
-    ];
-
-    result
+    ]
 }
 
 /// http://www.juddzone.com/ALGORITHMS/least_squares_3D_ellipsoid.html
@@ -209,7 +207,7 @@ pub fn poly_to_params_3d(coeffs: &[f32; 10]) -> (Vec3, Mat3) {
     let mut Tofs = Matrix4::identity();
     Tofs.set_row(3, &RowVector4::new(center[0], center[1], center[2], 1.));
 
-    let R = Tofs * (Amat * &Tofs.transpose());
+    let R = Tofs * (Amat * Tofs.transpose());
     // if printMe: print '\nAlgebraic form translated to center\n',R,'\n'
 
     // let rd = &R.data;

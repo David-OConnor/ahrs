@@ -11,12 +11,14 @@
 //! Magnetic inclination chart: https://upload.wikimedia.org/wikipedia/commons/d/de/World_Magnetic_Inclination_2015.pdf
 //! https://www.magnetic-declination.com/
 
+mod acc;
 pub mod attitude;
 mod linear_acc;
 mod mag;
 mod mag_ellipsoid_fitting;
 pub mod params;
 pub mod ppks;
+
 // mod filter;
 
 pub use crate::{attitude::Ahrs, params::Params};

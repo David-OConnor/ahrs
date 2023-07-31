@@ -11,27 +11,17 @@
 /// - Greater or less than 1G of acceleration, if the accel is calibrated.
 /// - Discontinuities or other anomolies when integrating accel-based attitude over time,
 /// - or, along those lines, discontinuities etc when fusing with gyro.
-use crate::{
-    attitude::{self, Ahrs},
-    ppks, Fix, G, UP,
-};
-
+///
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::ppks::PositVelEarthUnits;
 use defmt::println;
+
+use crate::{ppks, ppks::PositVelEarthUnits, Fix, UP};
 
 /// Estimate linear acceleration by comparing the fused attitude's up direction (based primarily
 /// on the gyro in the short term) to that from the accelerometer. This works well for short-duration
 /// linear accelerations, but fails for long-term ones, such as an orbit.
-pub fn from_gyro(
-    accel_data: Vec3,
-    // accel_mag: Vec3,
-    // att_acc: Quaternion,
-    // // att gyro must have heading removed, or acc must have heading added.
-    att_gyro: Quaternion,
-    acc_len_at_rest: f32,
-) -> Vec3 {
+pub fn from_gyro(accel_data: Vec3, att_gyro: Quaternion, acc_len_at_rest: f32) -> Vec3 {
     // This is the up vector as assessed from the attitude from the gyro. It is equivalent to
     // the accelerometer's normalized vector when linear acceleration is 0.
     let grav_axis_from_att_gyro = att_gyro.rotate_vec(UP);
@@ -45,9 +35,8 @@ pub fn from_gyro(
     // readings and this, therefore is linear acceleration.
     // This linear acc estimate is in earth coords.
 
-    // todo: Project to elim heading effects?
-    let att_acc_non_norm = attitude::att_from_accel(accel_data.to_normalized());
-    let att_diff_rot = att_acc_non_norm * att_gyro.inverse();
+    // let att_acc_non_norm = acc::att_from_accel(accel_data.to_normalized());
+    // let att_diff_rot = att_acc_non_norm * att_gyro.inverse();
 
     // acc = lin + grav
     // lin = acc - (grav_axis_gyro * G)

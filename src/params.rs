@@ -8,7 +8,7 @@
 use defmt::println;
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::{ppks::PositFused, Ahrs, ImuReadings};
+use crate::{ppks::PositFused, Ahrs, DeviceOrientation, ImuReadings};
 
 /// Aircraft flight parameters, at a given instant. Pitch and roll rates are in the aircraft's
 /// frame of reference.
@@ -68,7 +68,7 @@ impl Params {
         dt: f32,
     ) {
         let (accel_data, gyro_data, mag_data) = match ahrs.config.orientation {
-            crate::DeviceOrientation::YFwdXRight => {
+            DeviceOrientation::YFwdXRight => {
                 let accel_data = Vec3 {
                     x: imu_readings.a_x,
                     y: imu_readings.a_y,
@@ -82,20 +82,15 @@ impl Params {
                 };
 
                 // Invert x and y for mag due to the coordinate system it uses.
-                let mag_data = match mag_readings {
-                    Some(m) => {
-                        Some(Vec3 {
-                            x: -m.x, // negative due to our mag's coord system.
-                            y: -m.y,
-                            z: m.z,
-                        })
-                    }
-                    None => None,
-                };
+                let mag_data = mag_readings.map(|m| Vec3 {
+                    x: -m.x, // negative due to our mag's coord system.
+                    y: -m.y,
+                    z: m.z,
+                });
 
                 (accel_data, gyro_data, mag_data)
             }
-            crate::DeviceOrientation::YLeftXFwd => {
+            DeviceOrientation::YLeftXFwd => {
                 // todo: QC you don't have x and y sign reversed.
                 let accel_data = Vec3 {
                     x: -imu_readings.a_y,
@@ -110,14 +105,11 @@ impl Params {
                 };
 
                 // Invert x and y for mag due to the coordinate system it uses.
-                let mag_data = match mag_readings {
-                    Some(m) => Some(Vec3 {
-                        x: m.y,
-                        y: -m.x,
-                        z: m.z,
-                    }),
-                    None => None,
-                };
+                let mag_data = mag_readings.map(|m| Vec3 {
+                    x: m.y,
+                    y: -m.x,
+                    z: m.z,
+                });
 
                 (accel_data, gyro_data, mag_data)
             }
