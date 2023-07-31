@@ -147,6 +147,8 @@ impl AhrsCal {
         self.mag_sample_i_fwd = Default::default();
         self.mag_sample_count_up = Default::default();
         self.mag_sample_count_fwd = Default::default();
+
+        self.mag_cal_updated = true; // set to false in firmware once written to flash.
     }
 }
 

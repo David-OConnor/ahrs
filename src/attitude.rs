@@ -130,6 +130,7 @@ pub struct AhrsCal {
     pub linear_acc_bias: Vec3,
     pub hard_iron: Vec3,
     pub soft_iron: Mat3,
+    pub mag_cal_updated: bool,
     /// Magenetometer cal data, per attitude category.
     pub(crate) mag_cal_data_up: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
     pub(crate) mag_cal_data_fwd: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
@@ -159,6 +160,7 @@ impl Default for AhrsCal {
             // Rough, from GPS mag can.
             hard_iron: Vec3::new_zero(),
             soft_iron: Mat3::new_identity(),
+            mag_cal_updated: false,
             mag_cal_data_up: Default::default(),
             mag_cal_data_fwd: Default::default(),
             mag_sample_i_up: Default::default(),
@@ -202,7 +204,6 @@ pub struct Ahrs {
     /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
     /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
     pub initialized: bool,
-    // pub(crate) att_from_gyros: Quaternion,
     pub(crate) att_from_acc: Quaternion,
     pub(crate) att_from_mag: Option<Quaternion>,
     pub(crate) acc_calibrated: Vec3,
