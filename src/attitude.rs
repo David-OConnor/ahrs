@@ -48,6 +48,8 @@ pub struct AhrsConfig {
     /// accelerometer. Keep this in mind re expectations of gyro drift rate. It must be high enough to
     /// compensate for drift (but perhaps not much higher)
     pub update_amt_att_from_acc: f32,
+    /// This should be lower than the amount we update from acc.
+    pub update_amt_att_from_mag: f32,
     /// Affects how much gyro biases are updated from the accelerometer-based angular rate
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
     /// and the acc readings are noisy, but stable over time.
@@ -60,6 +62,9 @@ pub struct AhrsConfig {
     // pub acc_mag_threshold_no_lin: (f32, f32),
     /// If total acclerometer reading is within this value of G, update gyro from acc.
     pub total_accel_thresh: f32, // m/s^2
+    /// Similar function as for acc, but comparing to 1. (Our ideal magnetometer magnitude
+    /// after calibration.)
+    pub total_mag_thresh: f32,
     /// If estimated linear acceleration magnitude is greater than this, don't update gyro
     /// from acc.
     pub lin_acc_thresh: f32, // m/s^2
@@ -98,10 +103,12 @@ impl Default for AhrsConfig {
             mag_diff_lookback: 10.,
             mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
+            update_amt_att_from_mag: 15., // todo: Probably much lower; experimenting.
             update_amt_gyro_bias_from_acc: 0.10,
             update_amt_mag_heading: 0.1,
             // acc_mag_threshold_no_lin: (0.8, 1.2),
             total_accel_thresh: 0.4, // m/s^2
+            total_mag_thresh: 0.1,   // rel to 1
             lin_acc_thresh: 0.3,     // m/s^2
             // calibration: Default::default(),
             start_alignment_time: 2,
@@ -110,7 +117,7 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.99,
+            mag_cal_portion_req: 0.9,
             mag_cal_update_amt: 0.3,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
@@ -377,7 +384,6 @@ impl Ahrs {
             // This rotation is heading-invariant: Rotate the gyro *up* towards the acc *up*.
             let gyro_up = att_fused.rotate_vec(UP);
             let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
-            // let rot_gyro_to_acc = Quaternion::from_unit_vecs(accel_norm, gyro_up);
 
             let rot_acc_correction = Quaternion::new_identity().slerp(
                 rot_gyro_to_acc,
@@ -444,8 +450,8 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        if false {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");

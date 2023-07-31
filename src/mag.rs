@@ -181,82 +181,110 @@ impl Ahrs {
             return;
         }
 
-        // todo: Not sure why we have to do this swap.
-        // do the swap after applying cal.
-        // let y = mag.y;
-        // mag.y = mag.x;
-        // mag.x = y;
-
         let mag_norm = mag.to_normalized();
 
         // We use attitude from the accelerometer only here, to eliminate any
         // Z-axis component
         // todo: This is wrong. You need to find the angle only in the relevant plane.
-        let mag_earth_ref = self.att_from_acc.inverse().rotate_vec(mag_norm);
+        // let mag_earth_ref = self.att_from_acc.inverse().rotate_vec(mag_norm);
         // let mag_earth_ref = self.att_from_acc.rotate_vec(mag_norm);
 
         let att_mag = att_from_mag(mag_norm, self.mag_inclination_estimate); // todo: Self.incl estimate
         self.att_from_mag = Some(att_mag);
 
-        // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
-        // todo under linear accel.
-        // let heading_mag = heading_from_mag(mag_norm, att_acc);
-        let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
-        // let heading_mag = heading_from_att(att_mag);
-
-        let heading_mag = mag_norm.x.atan2(mag_norm.y); // todo temp
-
-        let heading_diff = -heading_mag - heading_fused;
-
-        let rotation = if self.initialized {
-            // Accept the whole magnetometer update.
-            Quaternion::from_axis_angle(UP, heading_diff)
-        } else {
-            // Nudge the heading in the direction of the gyro.
-            Quaternion::from_axis_angle(
-                UP,
-                heading_diff * self.config.update_amt_mag_heading * self.dt,
-            )
-        };
-
-        // todo: Put back.
-        // *att_fused = rotation * *att_fused;
-
-        // Assess magnetometer health by its comparison in rate change compared to the gyro.
-        match self.heading_mag {
-            Some(heading_mag_prev) => {
-                // todo: Find avg over many readings.
-                // todo: Since even a messed up mag seems to show constant readings
-                // todo when there is no rotation, consider only logging values here if
-                // todo dh/dt exceeds a certain value.
-
-                let dmag_dt = (heading_mag - heading_mag_prev) / self.dt;
-                let dgyro_dt = (heading_fused - self.heading_gyro) / self.dt;
-
-                self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
-
-                if self.num_updates % ((1. / self.dt) as u32) == 0 {
-                    println!(
-                        "Dmag: {} Dgyro: {} diff: {}",
-                        dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro
-                    );
-                }
-
-                // Fuse heading from gyro with heading from mag.
-                if self.recent_dh_mag_dh_gyro.unwrap().abs() < self.config.mag_gyro_diff_thresh {
-                    // heading_fused = (heading_prev * gyro_heading_weight + heading_mag * mag_heading_weight) / 2.;
-                }
-            }
-            None => {
-                self.recent_dh_mag_dh_gyro = None;
-            }
+        // Symmetry with acc here; similar logic etc.
+        // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
+        let mut update_gyro_from_mag = false;
+        // If it appears there is negligible non-calibrated-away interference, update our
+        // gyro readings as appropriate.
+        if mag.magnitude().abs() < self.config.total_mag_thresh {
+            update_gyro_from_mag = true;
         }
 
-        // todo: For now, we are using mag only for the heading.
+        if update_gyro_from_mag {
+            // See notes in the similar section for acc.
 
-        self.heading_mag = Some(heading_mag);
+            // todo: This mag vec finding is DRY with `att_from_mag`.
+            let incl_rot = Quaternion::from_axis_angle(RIGHT, self.mag_inclination_estimate);
+            let mag_field_vec = incl_rot.rotate_vec(FORWARD);
 
-        self.estimate_mag_inclination(mag_earth_ref);
+            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_vec);
+
+            let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
+
+            let rot_mag_correction = Quaternion::new_identity().slerp(
+                rot_gyro_to_mag,
+                self.config.update_amt_att_from_mag * self.dt,
+            );
+
+            // todo: QC the interaction between this and the acc update.
+            self.attitude = rot_mag_correction * self.attitude;
+        }
+
+        // todo: Remove in favor of the new, symmetric approach, if that demonstrates workign
+        if false {
+            // // todo: Use your fused/gyro att with heading subtracted for this, or it will be unreliable
+            // // todo under linear accel.
+            // // let heading_mag = heading_from_mag(mag_norm, att_acc);
+            // let heading_mag = heading_from_mag(mag_earth_ref, self.mag_declination);
+            // // let heading_mag = heading_from_att(att_mag);
+
+            // let heading_mag = mag_norm.x.atan2(mag_norm.y); // todo temp
+
+            // let heading_diff = -heading_mag - heading_fused;
+
+            // let rotation = if self.initialized {
+            //     // Accept the whole magnetometer update.
+            //     Quaternion::from_axis_angle(UP, heading_diff)
+            // } else {
+            //     // Nudge the heading in the direction of the gyro.
+            //     Quaternion::from_axis_angle(
+            //         UP,
+            //         heading_diff * self.config.update_amt_mag_heading * self.dt,
+            //     )
+            // };
+
+            // // todo: Put back.
+            // // *att_fused = rotation * *att_fused;
+
+            // // Assess magnetometer health by its comparison in rate change compared to the gyro.
+            // match self.heading_mag {
+            //     Some(heading_mag_prev) => {
+            //         // todo: Find avg over many readings.
+            //         // todo: Since even a messed up mag seems to show constant readings
+            //         // todo when there is no rotation, consider only logging values here if
+            //         // todo dh/dt exceeds a certain value.
+
+            //         let dmag_dt = (heading_mag - heading_mag_prev) / self.dt;
+            //         let dgyro_dt = (heading_fused - self.heading_gyro) / self.dt;
+
+            //         self.recent_dh_mag_dh_gyro = Some(dmag_dt - dgyro_dt);
+
+            //         if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            //             println!(
+            //                 "Dmag: {} Dgyro: {} diff: {}",
+            //                 dmag_dt, dgyro_dt, self.recent_dh_mag_dh_gyro
+            //             );
+            //         }
+
+            //         // Fuse heading from gyro with heading from mag.
+            //         if self.recent_dh_mag_dh_gyro.unwrap().abs() < self.config.mag_gyro_diff_thresh
+            //         {
+            //             // heading_fused = (heading_prev * gyro_heading_weight + heading_mag * mag_heading_weight) / 2.;
+            //         }
+            //     }
+            //     None => {
+            //         self.recent_dh_mag_dh_gyro = None;
+            //     }
+            // }
+
+            // // todo: For now, we are using mag only for the heading.
+
+            // self.heading_mag = Some(heading_mag);
+        }
+
+        // todo: Re-examine.
+        // self.estimate_mag_inclination(mag_earth_ref);
 
         if self.num_updates % ((1. / self.dt) as u32) == 0 {
             // if false {
@@ -303,13 +331,7 @@ impl Ahrs {
 
             print_quat(att_mag, "Att mag");
 
-            let euler_mag = att_mag.to_euler();
-            println!(
-                "Euler mag: p{} r{} y{}",
-                euler_mag.pitch, euler_mag.roll, euler_mag.yaw,
-            );
-
-            println!("Heading mag: {}", heading_mag);
+            // println!("Heading mag: {}", heading_mag);
         }
 
         if self.num_updates % self.config.update_ratio_mag_cal_log as u32 == 0 {
@@ -361,7 +383,6 @@ impl Ahrs {
     /// Estimate magnetic inclination. The returned value is in readians, down from
     /// the horizon.
     fn estimate_mag_inclination(&mut self, mag_earth_ref: Vec3) {
-        // todo: Inclination will be tracked and modified; not set independently every time.
         let mag_on_fwd_plane = mag_earth_ref.project_to_plane(RIGHT);
 
         // todo: This is currently heavily-dependent on pitch! Likely due to earth ref being wrong?
@@ -389,18 +410,11 @@ impl Ahrs {
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
 /// interference, and is noisy in general. Apply calibration prior to this step.
 /// Inclination is in radians.
-/// todo: Automatically determine inclination by comparing att from this function
-/// todo with that from our AHRS.
-/// todo: Can you use this as a santity check of your ACC/Gyro heading, adn fuse it?
-/// todo: The likely play is to apply mag attitude corrections when under linear acceleration
-/// todo for long durations.
 pub fn att_from_mag(mag_norm: Vec3, inclination: f32) -> Quaternion {
     // `mag_field_vec` points towards magnetic earth, and into the earth IOC inlination.
 
     let incl_rot = Quaternion::from_axis_angle(RIGHT, inclination);
     let mag_field_vec = incl_rot.rotate_vec(FORWARD);
-
-    // println!("Mag field vec: {} {} {}", mag_field_vec.x, mag_field_vec.y, mag_field_vec.z);
 
     Quaternion::from_unit_vecs(mag_field_vec, mag_norm)
 }
