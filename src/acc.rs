@@ -113,7 +113,8 @@ impl Ahrs {
             *att_fused = rot_acc_correction * *att_fused;
         }
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        if false {
             println!("Acc cal x{} y{} z{}", acc.x, acc.y, acc.z);
 
             println!(

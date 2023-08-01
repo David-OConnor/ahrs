@@ -209,8 +209,8 @@ impl Ahrs {
 
         self.update_mag_incl(mag_norm);
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            if false {
 
             // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
