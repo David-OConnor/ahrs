@@ -65,7 +65,6 @@ impl Params {
         imu_readings: &ImuReadings,
         mag_readings: Option<Vec3>,
         ahrs: &mut Ahrs,
-        dt: f32,
     ) {
         let (accel_data, gyro_data, mag_data) = match ahrs.config.orientation {
             DeviceOrientation::YFwdXRight => {
@@ -130,9 +129,9 @@ impl Params {
 
         // Calculate angular acceleration. Do this before updating velocities, since we use
         // the previous ones here.
-        self.a_pitch = (gyro_calibrated.x - self.v_pitch) / dt;
-        self.a_roll = (gyro_calibrated.y - self.v_roll) / dt;
-        self.a_yaw = (gyro_calibrated.z - self.v_yaw) / dt;
+        self.a_pitch = (gyro_calibrated.x - self.v_pitch) / ahrs.dt;
+        self.a_roll = (gyro_calibrated.y - self.v_roll) / ahrs.dt;
+        self.a_yaw = (gyro_calibrated.z - self.v_yaw) / ahrs.dt;
 
         self.v_pitch = gyro_calibrated.x;
         self.v_roll = gyro_calibrated.y;
