@@ -210,8 +210,7 @@ impl Ahrs {
         self.update_mag_incl(mag_norm);
 
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
-
+        if false {
             // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
             // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
 
@@ -266,7 +265,6 @@ impl Ahrs {
 
         // Angle between up and the mag reading. We subtract tau/4 to get angle below the horizon.
         let inclination_estimate = up.dot(mag_norm).acos() - TAU_DIV_4;
-
 
         // No need to update the ratio each time.
         if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {

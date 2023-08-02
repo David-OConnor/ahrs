@@ -312,8 +312,8 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");

@@ -150,10 +150,12 @@ impl PositInertial {
         static mut I: u32 = 0;
         unsafe { I += 1 };
 
-        if unsafe { I } % 1000 == 0 {
-            // if false {
+        let combined = self.combine_with_anchor();
+
+        // if unsafe { I } % 1000 == 0 {
+        if false {
             println!(
-                "Inertial: x{} y{} z{} -- vx{} vy{} vz{}",
+                "\n\nInertial: x{} y{} z{} -- vx{} vy{} vz{}",
                 self.posit.x,
                 self.posit.y,
                 self.posit.z,
@@ -162,7 +164,6 @@ impl PositInertial {
                 self.velocity.z
             );
 
-            let combined = self.combine_with_anchor();
             println!(
                 "Combined: lat{} lon{} msl{} -- vx{} vy{} vz{}",
                 combined.lat_e8,

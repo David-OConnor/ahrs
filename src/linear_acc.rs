@@ -16,9 +16,11 @@ use lin_alg2::f32::{Quaternion, Vec3};
 
 use defmt::println;
 
+use num_traits::Float;
+
 use crate::{ppks, ppks::PositVelEarthUnits, Fix, UP};
 
-/// Estimate linear acceleration by comparing the fused attitude's up direction (based primarily
+/// Estimate linear acceleration by comparinFg the fused attitude's up direction (based primarily
 /// on the gyro in the short term) to that from the accelerometer. This works well for short-duration
 /// linear accelerations, but fails for long-term ones, such as an orbit.
 pub fn from_gyro(accel_data: Vec3, att_gyro: Quaternion, acc_len_at_rest: f32) -> Vec3 {
@@ -85,6 +87,11 @@ pub(crate) fn from_gnss(fix: &Fix, fix_prev: &Fix, attitude: Quaternion) -> Vec3
     let d_v = attitude.inverse().rotate_vec(d_v_earth);
 
     let d_t = fix.timestamp_s - fix_prev.timestamp_s;
+
+    const EPS: f32 = 0.000001;
+    if d_t.abs() < EPS {
+        return Vec3::new_zero();
+    }
 
     d_v / d_t
 }
