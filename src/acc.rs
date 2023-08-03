@@ -99,7 +99,7 @@ impl Ahrs {
             let gyro_up = att_fused.rotate_vec(UP);
             let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
 
-            let rot_acc_correction = Quaternion::new_identity().slerp(
+            let rot_correction = Quaternion::new_identity().slerp(
                 rot_gyro_to_acc,
                 self.config.update_amt_att_from_acc * self.dt,
             );
@@ -110,7 +110,7 @@ impl Ahrs {
                 println!("rot angle: {}", rot_gyro_to_acc.angle());
             }
 
-            *att_fused = rot_acc_correction * *att_fused;
+            *att_fused = rot_correction * *att_fused;
         }
 
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {

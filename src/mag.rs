@@ -165,21 +165,19 @@ impl Ahrs {
 
         let mag_norm = mag.to_normalized();
 
-        // Going to a simple compensated heading-only appch for now.
-        let mag_tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag);
-        let hdg_mag = mag_tilt_compensated.x.atan2(mag_tilt_compensated.y);
-
         let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
-        let incl_rot = Quaternion::from_axis_angle(RIGHT, -1.2); // todo t
         let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
 
         if !self.initialized {
-            let up_rel_ac = att_fused.rotate_vec(UP);
+            // todo: DRY withe the normal updates, but with a much sharper correction.
+            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_absolute);
 
-            let rot_correction = Quaternion::from_axis_angle(up_rel_ac, hdg_mag);
+            let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
+
+            let rot_correction = Quaternion::new_identity().slerp(rot_gyro_to_mag, 0.5);
 
             *att_fused = rot_correction * *att_fused;
             return;
@@ -196,7 +194,6 @@ impl Ahrs {
 
         if update_gyro_from_mag {
             // See notes in the similar section for acc.
-
             let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_absolute);
 
             let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
@@ -228,8 +225,6 @@ impl Ahrs {
                 mag.z,
                 mag.magnitude()
             );
-
-            println!("Hdg mag: {:?}", hdg_mag); // todo t?
 
             println!("Estimated mag incl: {}", self.mag_inclination_estimate);
 
@@ -267,9 +262,6 @@ impl Ahrs {
         // Angle between up and the mag reading. We subtract tau/4 to get angle below the horizon.
         let inclination_estimate = up.dot(mag_norm).acos() - TAU_DIV_4;
 
-        // println!("Up: x{} y{} z{}. mag: x{} y{} z{}, Incl estimate inst: {:?}", up.x, up.y, up.z,
-        // mag_norm.x, mag_norm.y, mag_norm.z, inclination_estimate);
-
         // No need to update the ratio each time.
         if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {
             if self.initialized {
@@ -281,9 +273,8 @@ impl Ahrs {
                 self.mag_inclination_estimate = self.mag_inclination_estimate * (1. - incl_ratio)
                     + inclination_estimate * incl_ratio
             } else {
-                // todo: Not working. Currently uses the default; should converge reasonably quickly.
                 // Take the full update on the first run.
-                // self.mag_inclination_estimate = inclination_estimate;
+                self.mag_inclination_estimate = inclination_estimate;
             }
         }
     }
