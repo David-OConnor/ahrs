@@ -165,21 +165,23 @@ impl Ahrs {
 
         let mag_norm = mag.to_normalized();
 
-        let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
-        let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
+        // Going to a simple compensated heading-only appch for now.
+        let mag_tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag);
+        let hdg_mag = mag_tilt_compensated.x.atan2(mag_tilt_compensated.y);
 
-        // println!("Mag field abs: {:?} {} {}", mag_field_absolute.x, mag_field_absolute.y, mag_field_absolute.z);
-        // println!("Mag norm: {:?} {} {}", mag_norm.x, mag_norm.y, mag_norm.z);
+        let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
+        let incl_rot = Quaternion::from_axis_angle(RIGHT, -1.2); // todo t
+        let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
 
         if !self.initialized {
-            let mag_hdg = att_mag.to_axes().2;
-            // todo: Confirm you don' tneed inverse of att, or to just use UP directly.
-            let up_rel_aircraft = att_fused.rotate_vec(UP);
-            let heading_rotation = Quaternion::from_axis_angle(up_rel_aircraft, mag_hdg);
-            *att_fused = heading_rotation * *att_fused;
+            let up_rel_ac = att_fused.rotate_vec(UP);
+
+            let rot_correction = Quaternion::from_axis_angle(up_rel_ac, hdg_mag);
+
+            *att_fused = rot_correction * *att_fused;
             return;
         }
 
@@ -188,7 +190,7 @@ impl Ahrs {
         let mut update_gyro_from_mag = false;
         // If it appears there is negligible non-calibrated-away interference, update our
         // gyro readings as appropriate.
-        if mag.magnitude().abs() < self.config.total_mag_thresh {
+        if (mag.magnitude() - 1.).abs() < self.config.total_mag_thresh {
             update_gyro_from_mag = true;
         }
 
@@ -199,21 +201,18 @@ impl Ahrs {
 
             let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
 
-            let rot_mag_correction = Quaternion::new_identity().slerp(
+            let rot_correction = Quaternion::new_identity().slerp(
                 rot_gyro_to_mag,
                 self.config.update_amt_att_from_mag * self.dt,
             );
 
-            *att_fused = rot_mag_correction * *att_fused;
+            *att_fused = rot_correction * *att_fused;
         }
 
         self.update_mag_incl(mag_norm);
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        if false {
-            // let xy_norm = (mag.x.powi(2) + mag.y.powi(2)).sqrt();
-            // println!("\n\nMag xy: x{} y{}", mag.x / xy_norm, mag.y / xy_norm,);
-
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -229,6 +228,8 @@ impl Ahrs {
                 mag.z,
                 mag.magnitude()
             );
+
+            println!("Hdg mag: {:?}", hdg_mag); // todo t?
 
             println!("Estimated mag incl: {}", self.mag_inclination_estimate);
 
@@ -251,7 +252,7 @@ impl Ahrs {
 
             if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
             {
-                self.cal.update_mag_cal(self.config.mag_cal_update_amt);
+                self.cal.update_mag_cal(self.config.update_amt_mag_cal);
             }
         }
     }
@@ -265,6 +266,9 @@ impl Ahrs {
 
         // Angle between up and the mag reading. We subtract tau/4 to get angle below the horizon.
         let inclination_estimate = up.dot(mag_norm).acos() - TAU_DIV_4;
+
+        // println!("Up: x{} y{} z{}. mag: x{} y{} z{}, Incl estimate inst: {:?}", up.x, up.y, up.z,
+        // mag_norm.x, mag_norm.y, mag_norm.z, inclination_estimate);
 
         // No need to update the ratio each time.
         if self.num_updates % self.config.update_ratio_mag_incl as u32 == 0 {

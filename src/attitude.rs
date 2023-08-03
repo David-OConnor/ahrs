@@ -73,7 +73,7 @@ pub struct AhrsConfig {
     /// This portion of 1 categories must be filled to initiate a calibration.
     pub mag_cal_portion_req: f32,
     /// A value of 1.0 means new mag cals replace the prev. 0.5 means an average.
-    pub mag_cal_update_amt: f32,
+    pub update_amt_mag_cal: f32,
     /// In seconds. If the most recent fix is older than this, don't use it.
     pub max_fix_age_lin_acc: f32,
     pub orientation: DeviceOrientation,
@@ -85,10 +85,10 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 0.5,
+            update_amt_att_from_mag: 1.,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
-            total_mag_thresh: 0.3,   // rel to 1
+            total_mag_thresh: 0.4,   // rel to 1
             lin_acc_thresh: 0.3,     // m/s^2
             start_alignment_time: 2,
             alignment_duration: 2,
@@ -97,7 +97,7 @@ impl Default for AhrsConfig {
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
             mag_cal_portion_req: 0.85,
-            mag_cal_update_amt: 0.3,
+            update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
         }
@@ -317,18 +317,17 @@ impl Ahrs {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");
-
-            // print_quat(self.att_from_acc, "Att Acc");
+            print_quat(self.att_from_acc, "Att acc");
 
             // Temp: offset at idle appears to be -0.015, -0.01, .004
             println!(
-                "\nGyro raw: x{} y{} z{}",
-                gyro_data.x, gyro_data.y, gyro_data.z,
-            );
-
-            println!(
-                "Gyro cal: x{} y{} z{}\n",
-                gyro_calibrated.x, gyro_calibrated.y, gyro_calibrated.z,
+                "Gyro raw: x{} y{} z{}. Cal: x{} y{} z{}",
+                gyro_data.x,
+                gyro_data.y,
+                gyro_data.z,
+                gyro_calibrated.x,
+                gyro_calibrated.y,
+                gyro_calibrated.z,
             );
 
             // println!(
@@ -357,8 +356,6 @@ impl Ahrs {
             // println!("\nHeading fused: {:?}\n", heading_fused);
 
             // println!("Heading gyro: {}", heading_gyro);
-
-            println!("Acc len at rest: {:?}", self.cal.acc_len_at_rest);
 
             // println!(
             //     "Hdg diff mag gyro: {}",
