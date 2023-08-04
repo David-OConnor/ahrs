@@ -40,25 +40,26 @@ impl Ahrs {
         }
 
         // todo: YOu may wish to apply a lowpass filter to linear acc estimate.
-        let lin_acc_estimate = linear_acc::from_gyro(acc, *att_fused, self.cal.acc_len_at_rest);
+        let lin_acc_gyro = linear_acc::from_gyro(acc, *att_fused, self.cal.acc_len_at_rest);
+        self.lin_acc_gyro = lin_acc_gyro;
 
-        if let Some(lin_acc_gnss) = self.lin_acc_gnss {
-            if let Some(fix) = &self.fix_prev {
-                // todo: Put back once you figure out how to compare current time to this.
-                if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
-                    self.lin_acc_gnss = None;
-                } else if self.num_updates % ((1. / self.dt) as u32) == 0 {
-                    println!(
-                        "Lin acc GNSS: x{} y{} z{} mag{}",
-                        lin_acc_gnss.x,
-                        lin_acc_gnss.y,
-                        lin_acc_gnss.z,
-                        lin_acc_gnss.magnitude()
-                    );
-                }
-                // todo: Here etc, include your fusing with gyro lin acc estimate.
-            }
-        }
+        // if let Some(lin_acc_gnss) = self.lin_acc_gnss {
+        //     if let Some(fix) = &self.fix_prev {
+        //         // todo: Put back once you figure out how to compare current time to this.
+        //         if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
+        //             self.lin_acc_gnss = None;
+        //         } else if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        //             println!(
+        //                 "Lin acc GNSS: x{} y{} z{} mag{}",
+        //                 lin_acc_gnss.x,
+        //                 lin_acc_gnss.y,
+        //                 lin_acc_gnss.z,
+        //                 lin_acc_gnss.magnitude()
+        //             );
+        //         }
+        //         // todo: Here etc, include your fusing with gyro lin acc estimate.
+        //     }
+        // }
 
         // let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
@@ -66,9 +67,9 @@ impl Ahrs {
         // self.align(lin_acc_estimate, accel_data);
 
         // self.linear_acc_estimate = lin_acc_estimate_bias_removed;
-        self.linear_acc_estimate = lin_acc_estimate;
+        self.lin_acc_fused = lin_acc_gyro;
 
-        let lin_acc_estimate_bias_removed = lin_acc_estimate; // todo: For now we removed bias removal
+        let lin_acc_estimate_bias_removed = lin_acc_gyro; // todo: For now we removed bias removal
 
         // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
         let mut update_gyro_from_acc = false;
@@ -83,7 +84,7 @@ impl Ahrs {
         //     update_gyro_from_acc = true;
         // }
 
-        let att_acc_w_lin_removed = att_from_accel((acc - lin_acc_estimate).to_normalized());
+        let att_acc_w_lin_removed = att_from_accel((acc - lin_acc_gyro).to_normalized());
 
         // Make sure we update heading_gyro after mag handling; we use it to diff gyro heading.
         // todo: Remove `heading_gyro` if you end up not using it.
@@ -110,11 +111,11 @@ impl Ahrs {
             println!("Acc cal x{} y{} z{}", acc.x, acc.y, acc.z);
 
             println!(
-                "\nLin acc: x{} y{} z{} mag{}",
-                lin_acc_estimate.x,
-                lin_acc_estimate.y,
-                lin_acc_estimate.z,
-                lin_acc_estimate.magnitude(),
+                "\nLin acc gyro: x{} y{} z{} mag{}",
+                lin_acc_gyro.x,
+                lin_acc_gyro.y,
+                lin_acc_gyro.z,
+                lin_acc_gyro.magnitude(),
             );
         }
     }

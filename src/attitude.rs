@@ -187,7 +187,13 @@ pub struct Ahrs {
     pub config: AhrsConfig,
     pub cal: AhrsCal,
     pub attitude: Quaternion,
-    pub linear_acc_estimate: Vec3,
+    /// Linear acceleration, as estimated by comparing the fused attitude's "UP"
+    /// with that of the accelerometer.
+    pub(crate) lin_acc_gyro: Vec3,
+    /// Linear acceleration as determined by the GNSS. Note that we get these updates much more
+    /// seldom than INS updates; store until ready to use
+    pub(crate) lin_acc_gnss: Option<Vec3>,
+    pub lin_acc_fused: Vec3,
     /// We set this var upon the first update; this forces the gyro to take a full update from the
     /// accelerometer. Without this, we maay experience strong disagreement between the gyro and acc
     /// at start, since the gyro initializes to level, regardless of actual aircraft attitude.
@@ -216,9 +222,6 @@ pub struct Ahrs {
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
     pub(crate) mag_declination: f32,
-    /// Linear acceleration as determined by the GNSS. Note that we get these updates much more
-    /// seldom than INS updates; store until ready to use
-    pub(crate) lin_acc_gnss: Option<Vec3>,
     /// We use this location for updating linear acceleration using GNSS
     /// todo: You may need a list of several to use the arc-radius approach.
     pub(crate) fix_prev: Option<Fix>,
@@ -353,6 +356,15 @@ impl Ahrs {
             //     acc_calibrated.magnitude()
             // );
 
+            println!(
+                "Lin acc gyro x{} y{} z{}",
+                self.lin_acc_gyro.x, self.lin_acc_gyro.y, self.lin_acc_gyro.z
+            );
+
+            if let Some(la) = self.lin_acc_gnss {
+                println!("Lin acc GNSS: x{} y{} z{}", la.x, la.y, la.z);
+            }
+
             // println!("\nHeading fused: {:?}\n", heading_fused);
 
             // println!("Heading gyro: {}", heading_gyro);
@@ -425,6 +437,7 @@ impl Ahrs {
 
     /// Update the linear acc estimates and related state from a GNSS fix.
     pub fn update_from_fix(&mut self, fix: &Fix) {
+        // println!("FIX here: {}", fix.timestamp_s);
         if let Some(fix_prev) = &self.fix_prev {
             if fix.timestamp_s - fix_prev.timestamp_s < self.config.max_fix_age_lin_acc {
                 self.lin_acc_gnss = Some(linear_acc::from_gnss(fix, fix_prev, self.attitude));

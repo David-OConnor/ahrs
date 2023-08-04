@@ -118,7 +118,7 @@ impl Params {
 
         // Now that we've estimated attitude, and applied calibrations, update parameters.
         self.attitude = ahrs.attitude;
-        self.accel_linear = ahrs.linear_acc_estimate;
+        self.accel_linear = ahrs.lin_acc_fused;
 
         let acc_calibrated = ahrs.acc_calibrated;
         let gyro_calibrated = ahrs.gyro_calibrated;
