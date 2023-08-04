@@ -43,24 +43,6 @@ impl Ahrs {
         let lin_acc_gyro = linear_acc::from_gyro(acc, *att_fused, self.cal.acc_len_at_rest);
         self.lin_acc_gyro = lin_acc_gyro;
 
-        // if let Some(lin_acc_gnss) = self.lin_acc_gnss {
-        //     if let Some(fix) = &self.fix_prev {
-        //         // todo: Put back once you figure out how to compare current time to this.
-        //         if self.timestamp - fix.timestamp_s > self.config.max_fix_age_lin_acc {
-        //             self.lin_acc_gnss = None;
-        //         } else if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        //             println!(
-        //                 "Lin acc GNSS: x{} y{} z{} mag{}",
-        //                 lin_acc_gnss.x,
-        //                 lin_acc_gnss.y,
-        //                 lin_acc_gnss.z,
-        //                 lin_acc_gnss.magnitude()
-        //             );
-        //         }
-        //         // todo: Here etc, include your fusing with gyro lin acc estimate.
-        //     }
-        // }
-
         // let lin_acc_estimate_bias_removed = lin_acc_estimate - self.cal.linear_acc_bias;
 
         // todo: Rework alignment

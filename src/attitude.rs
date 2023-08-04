@@ -234,6 +234,7 @@ pub struct Ahrs {
     pub(crate) timestamp: f32,
     acc_gyro_rate_diff: Vec3,
     gyro_bias_complete: bool,
+    last_fix_timestamp: f32, // seconds, using this struct's timestamp.
 }
 
 impl Ahrs {
@@ -305,6 +306,11 @@ impl Ahrs {
 
                 self.gyro_bias_complete = true;
             }
+        }
+
+        // Time out the GNSS-based lin acc measurements as required
+        if self.timestamp - self.last_fix_timestamp > self.config.max_fix_age_lin_acc {
+            self.lin_acc_gnss = None;
         }
 
         self.attitude = att_fused;
@@ -437,6 +443,8 @@ impl Ahrs {
 
     /// Update the linear acc estimates and related state from a GNSS fix.
     pub fn update_from_fix(&mut self, fix: &Fix) {
+        self.last_fix_timestamp = self.timestamp;
+
         // println!("FIX here: {}", fix.timestamp_s);
         if let Some(fix_prev) = &self.fix_prev {
             if fix.timestamp_s - fix_prev.timestamp_s < self.config.max_fix_age_lin_acc {
@@ -489,66 +497,6 @@ pub fn find_accel_offset(posit_offset: Vec3, gyro_readings: Vec3) -> Vec3 {
 
     // todo: QC these
     posit_offset.cross(rot_axis * rot_angle)
-}
-
-// todo: For mag cal, you can use acc/gyro-fused attitude to determine which mag sample points to keep,
-// todo ie to keep points evenly-spaced. Try that this evening. T
-
-/// Estimate hard and soft iron offsets from sample points
-/// todo: Run this periodically/regularly, instead of a separate mag cal procedure.
-fn mag_offsets_from_points(sample_pts: &[Vec3]) -> (Mat3, Vec3) {
-    // Least-squares approach to model the ellipse.
-    // http://www.juddzone.com/ALGORITHMS/least_squares_3D_ellipsoid.html
-
-    // Cruder approach using max and min values: https://www.appelsiini.net/2018/calibrate-magnetometer/
-
-    // For now, our hard-iron procedure uses max and min values. We should at least make some effort
-    // to remove outliers.
-
-    // see also: http://www.juddzone.com/ALGORITHMS/least_squares_precision_3D_ellipsoid.html
-
-    let mut x_min = 99999.;
-    let mut x_max = -99999.;
-    let mut y_min = 99999.;
-    let mut y_max = -99999.;
-    let mut z_min = 99999.;
-    let mut z_max = -99999.;
-
-    for pt in sample_pts {
-        if pt.x < x_min {
-            x_min = pt.x;
-        } else if pt.x > x_max {
-            x_max = pt.x;
-        }
-        if pt.y < y_min {
-            y_min = pt.y;
-        } else if pt.y > y_max {
-            y_max = pt.y;
-        }
-
-        if pt.z < z_min {
-            z_min = pt.z;
-        } else if pt.z > z_max {
-            z_max = pt.z;
-        }
-    }
-
-    let hard_iron = Vec3::new(
-        (x_max - x_min) / 2.,
-        (y_max - y_min) / 2.,
-        (z_max - z_min) / 2.,
-    );
-
-    let avg_delta = (hard_iron.x + hard_iron.y + hard_iron.z) / 3.;
-
-    let scale_x = avg_delta / hard_iron.x;
-    let scale_y = avg_delta / hard_iron.y;
-    let scale_z = avg_delta / hard_iron.z;
-
-    // todo temp
-    let soft_iron = Mat3::new_identity();
-
-    (soft_iron, hard_iron)
 }
 
 /// gnss_acc: in m/s; differed from subsequent readings.
