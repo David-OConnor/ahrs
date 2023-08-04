@@ -7,7 +7,7 @@ use lin_alg2::f32::{Quaternion, Vec3};
 use defmt::println;
 
 use crate::{
-    attitude::{Ahrs, AhrsCal},
+    attitude::{make_nudge, Ahrs, AhrsCal},
     linear_acc, print_quat, UP,
 };
 
@@ -95,20 +95,12 @@ impl Ahrs {
         if update_gyro_from_acc {
             // Apply a rotation of the gyro solution towards the acc solution, if we think we are not under
             // much linear acceleration.
-            // This rotation is heading-invariant: Rotate the gyro *up* towards the acc *up*.
-            let gyro_up = att_fused.rotate_vec(UP);
-            let rot_gyro_to_acc = Quaternion::from_unit_vecs(gyro_up, accel_norm);
-
-            let rot_correction = Quaternion::new_identity().slerp(
-                rot_gyro_to_acc,
-                self.config.update_amt_att_from_acc * self.dt,
+            let rot_correction = make_nudge(
+                self.attitude,
+                accel_norm,
+                UP,
+                self.config.update_amt_att_from_mag * self.dt,
             );
-
-            // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
-                print_quat(rot_gyro_to_acc, "Rot to apply");
-                println!("rot angle: {}", rot_gyro_to_acc.angle());
-            }
 
             *att_fused = rot_correction * *att_fused;
         }

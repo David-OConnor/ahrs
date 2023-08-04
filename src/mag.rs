@@ -13,7 +13,7 @@ use crate::ppks::PositVelEarthUnits;
 use defmt::println;
 
 use crate::{
-    attitude::{Ahrs, AhrsCal},
+    attitude::{make_nudge, Ahrs, AhrsCal},
     mag_ellipsoid_fitting::{
         self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
     },
@@ -172,12 +172,7 @@ impl Ahrs {
         self.att_from_mag = Some(att_mag);
 
         if !self.initialized {
-            // todo: DRY withe the normal updates, but with a much sharper correction.
-            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_absolute);
-
-            let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
-
-            let rot_correction = Quaternion::new_identity().slerp(rot_gyro_to_mag, 0.5);
+            let rot_correction = make_nudge(self.attitude, mag_norm, mag_field_absolute, 0.5);
 
             *att_fused = rot_correction * *att_fused;
             return;
@@ -193,16 +188,12 @@ impl Ahrs {
         }
 
         if update_gyro_from_mag {
-            // See notes in the similar section for acc.
-            let gyro_mag_field_vec = self.attitude.rotate_vec(mag_field_absolute);
-
-            let rot_gyro_to_mag = Quaternion::from_unit_vecs(gyro_mag_field_vec, mag_norm);
-
-            let rot_correction = Quaternion::new_identity().slerp(
-                rot_gyro_to_mag,
+            let rot_correction = make_nudge(
+                self.attitude,
+                mag_norm,
+                mag_field_absolute,
                 self.config.update_amt_att_from_mag * self.dt,
             );
-
             *att_fused = rot_correction * *att_fused;
         }
 

@@ -553,3 +553,19 @@ pub fn heading_from_gnss_acc(gnss_acc_nse: Vec3, acc_lin_imu: Vec3) -> f32 {
 
     heading_from_att(att_from_gnss)
 }
+
+/// Used to nudge the gyro from an absolute, but incomplete attitude reference, eg accelerometer
+/// or magnetometer. `ref_vec` is a vector that we know is correct from the updating source.
+/// This rotation is heading-invariant: Eg Rotate the gyro *up* towards the acc *up*.
+pub(crate) fn make_nudge(
+    attitude: Quaternion,
+    sensor_norm: Vec3,
+    anchor: Vec3,
+    update_amt: f32,
+) -> Quaternion {
+    let anchor_ac_frame = attitude.rotate_vec(anchor);
+
+    let rotation = Quaternion::from_unit_vecs(anchor_ac_frame, sensor_norm);
+
+    Quaternion::new_identity().slerp(rotation, update_amt)
+}
