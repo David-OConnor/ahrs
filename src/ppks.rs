@@ -56,7 +56,8 @@ impl PositFused {
         let inertial_absolute = inertial.combine_with_anchor();
 
         // For this reference, we update gnss DR with our inertial position and velocity
-        let update_amount: f32 = 0.5;
+        let update_amount = 0.5;
+        let update_amount = 1.;
 
         let add_to_gnss = PositVelEarthUnits {
             // todo: This /2 is a rough proxy for update amount on fixed-point.
@@ -65,6 +66,15 @@ impl PositFused {
             elevation_msl: (inertial_absolute.elevation_msl - gnss_dr.elevation_msl)
                 * update_amount,
             velocity: (inertial_absolute.velocity - gnss_dr.velocity) * update_amount,
+        };
+
+        // todo: Temp, until inertial works.
+        let add_to_gnss = PositVelEarthUnits {
+            // todo: This /2 is a rough proxy for update amount on fixed-point.
+            lat_e8: 0,
+            lon_e8: 0,
+            elevation_msl: 0.,
+            velocity: Vec3::new_zero(),
         };
 
         let vel = gnss_dr.velocity + add_to_gnss.velocity;

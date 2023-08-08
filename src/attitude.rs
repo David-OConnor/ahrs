@@ -265,6 +265,8 @@ impl Ahrs {
         let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
 
         self.handle_acc(accel_data, &mut att_fused);
+        // todo: Temporarily only using acc for lin accel estimate
+        self.lin_acc_fused = self.lin_acc_gyro;
 
         // todo: FIgure out what here should have IIR lowpass filters aplied.
 
@@ -321,8 +323,8 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");
