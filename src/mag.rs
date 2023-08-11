@@ -194,7 +194,22 @@ impl Ahrs {
                 mag_field_absolute,
                 self.config.update_amt_att_from_mag * self.dt,
             );
-            *att_fused = rot_correction * *att_fused;
+
+            // todo: QC order; trial_error
+            // let up_rel_earth = att_fused.rotate_vec(UP); // todo: QC this!
+            // todo: QC direction.
+            // let declination_correction = Quaternion::from_axis_angle(up_rel_earth, self.mag_declination).to_normalized();
+            
+
+            // let declination_amt = self.mag_declination.co
+            // let declination_correction = Quaternion::from_axis_angle(UP, self.mag_declination).to_normalized();
+
+            // todo: Come back to this.
+
+            // println!("DC: {:?}", declination_correction.w);
+            let declination_correction = Quaternion::new_identity();
+            *att_fused = declination_correction * (rot_correction * *att_fused);
+            // *att_fused = rot_correction * *att_fused;
         }
 
         self.update_mag_incl(mag_norm);

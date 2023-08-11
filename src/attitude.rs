@@ -37,7 +37,8 @@ pub struct AhrsConfig {
     /// accelerometer. Keep this in mind re expectations of gyro drift rate. It must be high enough to
     /// compensate for drift (but perhaps not much higher)
     pub update_amt_att_from_acc: f32,
-    /// This should be lower than the amount we update from acc.
+    /// This should be lower than the amount we update from acc, but enough to overcome
+    /// drift, and not be overwhelmed by the AC's update.
     pub update_amt_att_from_mag: f32,
     /// Affects how much gyro biases are updated from the accelerometer-based angular rate
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
@@ -85,7 +86,7 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 0.5,
+            update_amt_att_from_mag: 1.5,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.4,   // rel to 1
@@ -96,7 +97,7 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.85,
+            mag_cal_portion_req: 0.80,
             update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
@@ -242,6 +243,7 @@ impl Ahrs {
         Self {
             dt,
             mag_declination: -0.032, // Raleigh
+            // mag_declination: 6.28 / 8., // todo: testing
             mag_inclination_estimate: 1.2,
             config: AhrsConfig {
                 orientation,
@@ -315,7 +317,8 @@ impl Ahrs {
             self.lin_acc_gnss = None;
         }
 
-        self.attitude = att_fused;
+        // Normalize each update, to prevent normalization errors from accumulating.
+        self.attitude = att_fused.to_normalized();
 
         self.timestamp += self.dt;
 
@@ -323,8 +326,8 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");

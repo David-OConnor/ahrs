@@ -162,8 +162,8 @@ impl PositInertial {
 
         let combined = self.combine_with_anchor();
 
-        if unsafe { I } % 2000 == 0 {
-            // if false {
+        // if unsafe { I } % 2000 == 0 {
+            if false {
             println!(
                 "\n\nInertial: x{} y{} z{} -- vx{} vy{} vz{}",
                 self.posit.x,
