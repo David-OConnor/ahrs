@@ -168,7 +168,6 @@ impl Ahrs {
         let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
         let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
 
-
         // todo: QC order; trial_error
         // let up_rel_earth = att_fused.rotate_vec(UP); // todo: QC this!
         // todo: QC direction.
@@ -179,7 +178,6 @@ impl Ahrs {
         // todo: Come back to this.
         // println!("DC: {:?}", declination_correction.w);
         // let declination_correction = Quaternion::new_identity();
-
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
@@ -214,7 +212,7 @@ impl Ahrs {
         self.update_mag_incl(mag_norm);
 
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
+        if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
