@@ -86,7 +86,7 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 1.5,
+            update_amt_att_from_mag: 1.2,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.4,   // rel to 1
@@ -266,6 +266,10 @@ impl Ahrs {
 
         let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
 
+         if self.num_updates % ((1. / self.dt) as u32) == 0 {
+             print_quat(att_fused, "Att Gyro");
+         }
+
         self.handle_acc(accel_data, &mut att_fused);
         // todo: Temporarily only using acc for lin accel estimate
         self.lin_acc_fused = self.lin_acc_gyro;
@@ -274,6 +278,7 @@ impl Ahrs {
 
         // Fuse with mag data if available.
         if let Some(mag) = mag_data {
+            println!("MAG  HANDLING");
             self.handle_mag(mag, &mut att_fused);
         }
 
@@ -327,13 +332,12 @@ impl Ahrs {
         }
 
         if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+        //     if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");
             print_quat(self.att_from_acc, "Att acc");
 
-            // Temp: offset at idle appears to be -0.015, -0.01, .004
             println!(
                 "Gyro raw: x{} y{} z{}. Cal: x{} y{} z{}",
                 gyro_data.x,
@@ -375,6 +379,8 @@ impl Ahrs {
             if let Some(la) = self.lin_acc_gnss {
                 println!("Lin acc GNSS: x{} y{} z{}", la.x, la.y, la.z);
             }
+
+            print_quat(self.att_from_acc, "ATT from acc");
 
             // println!("\nHeading fused: {:?}\n", heading_fused);
 

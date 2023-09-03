@@ -41,6 +41,8 @@ pub struct Params {
     pub v_y: f32,
     pub v_z: f32,
 
+    pub v_z_baro: f32,
+
     pub v_pitch: f32,
     pub v_roll: f32,
     pub v_yaw: f32,
