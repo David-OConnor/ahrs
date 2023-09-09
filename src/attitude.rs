@@ -17,7 +17,7 @@ use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 use defmt::println;
 
 use crate::{
-    linear_acc,
+    blend, linear_acc,
     mag_ellipsoid_fitting::{MAG_SAMPLES_PER_CAT, SAMPLE_VERTICES},
     print_quat, DeviceOrientation, Fix, FORWARD, G, RIGHT, UP,
 };
@@ -73,13 +73,12 @@ pub struct AhrsConfig {
     pub update_ratio_mag_cal_log: u16,
     /// This portion of 1 categories must be filled to initiate a calibration.
     pub mag_cal_portion_req: f32,
-    /// A value of 1.0 means new mag cals replace the prev. 0.5 means an average.
-    pub update_amt_mag_cal: f32,
+    // A value of 1.0 means new mag cals replace the prev. 0.5 means an average.
+    // pub update_amt_mag_cal: f32,
     /// In seconds. If the most recent fix is older than this, don't use it.
     pub max_fix_age_lin_acc: f32,
     pub orientation: DeviceOrientation,
 }
-
 
 impl Default for AhrsConfig {
     fn default() -> Self {
@@ -87,7 +86,7 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 1.8,
+            update_amt_att_from_mag: 2.,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
@@ -98,8 +97,8 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.70,
-            update_amt_mag_cal: 0.5,
+            mag_cal_portion_req: 0.65,
+            // update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
         }
@@ -234,6 +233,9 @@ pub struct Ahrs {
     pub(crate) num_updates: u32,
     /// Timestamp, in seconds.
     pub(crate) timestamp: f32,
+    /// Difference from 1.0 of the magnetometer's magnetude. We use this
+    /// to weigh
+    pub(crate) recent_mag_variance: f32,
     acc_gyro_rate_diff: Vec3,
     gyro_bias_complete: bool,
     last_fix_timestamp: f32, // seconds, using this struct's timestamp.

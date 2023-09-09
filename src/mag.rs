@@ -9,15 +9,18 @@ use num_traits::float::Float; // abs etc
 
 use lin_alg2::f32::{Quaternion, Vec3};
 
-use crate::ppks::PositVelEarthUnits;
 use defmt::println;
 
 use crate::{
     attitude::{make_nudge, Ahrs, AhrsCal},
+    blend,
     mag_ellipsoid_fitting::{
         self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
     },
-    print_quat, FORWARD, RIGHT, UP,
+    ppks::PositVelEarthUnits,
+    print_quat,
+    util::map_linear,
+    FORWARD, RIGHT, UP,
 };
 
 impl AhrsCal {
@@ -137,9 +140,6 @@ impl AhrsCal {
         self.hard_iron = self.hard_iron * update_amt_inv + hard_iron * update_amt;
         self.soft_iron = self.soft_iron.clone() * update_amt_inv + soft_iron * update_amt;
 
-        // todo: Save to flash, but not that this should probably not be done while airborne
-        // todo as flash access can cause the program to hang. (?)
-
         // Reset our sample counters. We leave the sample data in place, since we can still
         // use the readings in the next calibration. (Since we initiate cal without completely
         // filling it)
@@ -189,12 +189,19 @@ impl Ahrs {
             return;
         }
 
+        let magnetometer_magnitude = mag.magnitude(); // Say that 10 times fast?
+
+        let update_amt_mag_var = 0.10 * self.dt; // todo: Store this const as a struct param.
+        let mag_variance = (mag.magnitude() - 1.).powi(2);
+        self.recent_mag_variance =
+            blend(self.recent_mag_variance, mag_variance, update_amt_mag_var);
+
         // Symmetry with acc here; similar logic etc.
         // todo: Move this update_gyro_from_acc logic elsewhere, like a dedicated fn; or, rework it.
         let mut update_gyro_from_mag = false;
         // If it appears there is negligible non-calibrated-away interference, update our
         // gyro readings as appropriate.
-        if (mag.magnitude() - 1.).abs() < self.config.total_mag_thresh {
+        if (magnetometer_magnitude - 1.).abs() < self.config.total_mag_thresh {
             update_gyro_from_mag = true;
         }
 
@@ -212,7 +219,7 @@ impl Ahrs {
         self.update_mag_incl(mag_norm);
 
         if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        // if false {
+            // if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -230,6 +237,7 @@ impl Ahrs {
             );
 
             println!("Estimated mag incl: {}", self.mag_inclination_estimate);
+            println!("Recent mag var: {}", self.recent_mag_variance);
 
             print_quat(att_mag, "Att mag");
         }
@@ -250,7 +258,14 @@ impl Ahrs {
 
             if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
             {
-                self.cal.update_mag_cal(self.config.update_amt_mag_cal);
+                // Ie, if the recent magnetometer magnitude is too high, take all or almost all of the update.
+                // todo: Store these consts in the main struct?
+                let mut update_amt_mag_cal =
+                    map_linear(self.recent_mag_variance, (0., 0.3), (0.1, 1.));
+                if update_amt_mag_cal > 1. {
+                    update_amt_mag_cal = 1.;
+                }
+                self.cal.update_mag_cal(update_amt_mag_cal);
             }
         }
     }
@@ -273,8 +288,11 @@ impl Ahrs {
                     * self.dt
                     * self.config.update_ratio_mag_incl as f32;
 
-                self.mag_inclination_estimate = self.mag_inclination_estimate * (1. - incl_ratio)
-                    + inclination_estimate * incl_ratio
+                self.mag_inclination_estimate = blend(
+                    self.mag_inclination_estimate,
+                    inclination_estimate,
+                    incl_ratio,
+                );
             } else {
                 // Take the full update on the first run.
                 self.mag_inclination_estimate = inclination_estimate;

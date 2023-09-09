@@ -18,6 +18,7 @@ mod mag;
 mod mag_ellipsoid_fitting;
 pub mod params;
 pub mod ppks;
+mod util;
 
 // mod filter;
 
@@ -173,4 +174,12 @@ pub fn print_quat(quat: Quaternion, name: &str) {
         "{} -- x{} y{} z{}",
         name, x_component, y_component, z_component
     );
+}
+
+/// `amount=1` means val1; amount=0 means val0
+/// todo: Make this generic over things that mutiply? Missed opportunity to use this
+/// todo in a few places for Vec and Matrix.
+pub(crate) fn blend(val0: f32, val1: f32, amount: f32) -> f32 {
+    let amount_inv = 1. - amount;
+    val0 * amount_inv + val1 * amount
 }
