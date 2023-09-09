@@ -86,7 +86,7 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 2.,
+            update_amt_att_from_mag: 2.3,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
@@ -215,7 +215,8 @@ pub struct Ahrs {
     // /// This is `None` if there are no mag reading provided.
     // pub(crate) recent_dh_mag_dh_gyro: Option<f32>,
     /// Use our gyro/acc fused attitude to estimate magnetic inclination.
-    pub(crate) mag_inclination_estimate: f32,
+    /// Public to allow its use for mag health.
+    pub mag_inclination_estimate: f32,
     // mag_cal_in_progress: bool,
     /// Time between updates, in seconds.
     pub(crate) dt: f32,
@@ -234,8 +235,8 @@ pub struct Ahrs {
     /// Timestamp, in seconds.
     pub(crate) timestamp: f32,
     /// Difference from 1.0 of the magnetometer's magnetude. We use this
-    /// to weigh
-    pub(crate) recent_mag_variance: f32,
+    /// to weigh. Public, as used to gauge magnetometer health.
+    pub recent_mag_variance: f32,
     acc_gyro_rate_diff: Vec3,
     gyro_bias_complete: bool,
     last_fix_timestamp: f32, // seconds, using this struct's timestamp.

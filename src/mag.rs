@@ -192,7 +192,8 @@ impl Ahrs {
         let magnetometer_magnitude = mag.magnitude(); // Say that 10 times fast?
 
         let update_amt_mag_var = 0.10 * self.dt; // todo: Store this const as a struct param.
-        let mag_variance = (mag.magnitude() - 1.).powi(2);
+                                                 // let mag_variance = (mag.magnitude() - 1.).powi(2);
+        let mag_variance = (mag.magnitude() - 1.).abs();
         self.recent_mag_variance =
             blend(self.recent_mag_variance, mag_variance, update_amt_mag_var);
 
