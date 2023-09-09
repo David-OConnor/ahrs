@@ -211,8 +211,8 @@ impl Ahrs {
 
         self.update_mag_incl(mag_norm);
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-        if false {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+        // if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,

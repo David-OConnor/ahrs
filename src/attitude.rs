@@ -47,7 +47,7 @@ pub struct AhrsConfig {
     /// If total acclerometer reading is within this value of G, update gyro from acc.
     pub total_accel_thresh: f32, // m/s^2
     /// Similar function as for acc, but comparing to 1. (Our ideal magnetometer magnitude
-    /// after calibration.)
+    /// after calibration must be between 1 + and 1 - this to be considered valid.)
     pub total_mag_thresh: f32,
     /// If estimated linear acceleration magnitude is greater than this, don't update gyro
     /// from acc.
@@ -80,16 +80,17 @@ pub struct AhrsConfig {
     pub orientation: DeviceOrientation,
 }
 
+
 impl Default for AhrsConfig {
     fn default() -> Self {
         Self {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 1.2,
+            update_amt_att_from_mag: 1.8,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
-            total_mag_thresh: 0.4,   // rel to 1
+            total_mag_thresh: 0.3,   // rel to 1
             lin_acc_thresh: 0.3,     // m/s^2
             start_alignment_time: 2,
             alignment_duration: 2,
@@ -97,7 +98,7 @@ impl Default for AhrsConfig {
             update_amt_mag_incl_estimate: 0.05,
             update_ratio_mag_incl: 100,
             update_ratio_mag_cal_log: 160,
-            mag_cal_portion_req: 0.80,
+            mag_cal_portion_req: 0.70,
             update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
@@ -278,7 +279,6 @@ impl Ahrs {
 
         // Fuse with mag data if available.
         if let Some(mag) = mag_data {
-            println!("MAG  HANDLING");
             self.handle_mag(mag, &mut att_fused);
         }
 
