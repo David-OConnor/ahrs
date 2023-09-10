@@ -78,6 +78,9 @@ pub struct AhrsConfig {
     /// In seconds. If the most recent fix is older than this, don't use it.
     pub max_fix_age_lin_acc: f32,
     pub orientation: DeviceOrientation,
+    /// If estimated mag incl is > this, don't update. Indicates interference.
+    /// At very far north latitudes, this is a problem.
+    pub max_mag_incl: f32,
 }
 
 impl Default for AhrsConfig {
@@ -101,6 +104,7 @@ impl Default for AhrsConfig {
             // update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
+            max_mag_incl: 1.35,
         }
     }
 }
