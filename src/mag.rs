@@ -23,7 +23,6 @@ use crate::{
     FORWARD, RIGHT, UP,
 };
 
-
 impl AhrsCal {
     /// Apply the hard and soft iron offsets to our readings.
     pub fn apply_cal_mag(&self, data: Vec3) -> Vec3 {
@@ -217,8 +216,9 @@ impl Ahrs {
         let mut update_gyro_from_mag = false;
         // If it appears there is negligible non-calibrated-away interference, update our
         // gyro readings as appropriate.
-        if (magnetometer_magnitude - 1.).abs() < self.config.total_mag_thresh &&
-                self.mag_inclination_estimate < self.config.max_mag_incl {
+        if (magnetometer_magnitude - 1.).abs() < self.config.total_mag_thresh
+            && self.mag_inclination_estimate < self.config.mag_incl_max
+        {
             update_gyro_from_mag = true;
         }
 

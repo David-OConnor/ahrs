@@ -49,6 +49,9 @@ pub struct AhrsConfig {
     /// Similar function as for acc, but comparing to 1. (Our ideal magnetometer magnitude
     /// after calibration must be between 1 + and 1 - this to be considered valid.)
     pub total_mag_thresh: f32,
+    /// If estimated mag incl is > this, don't update. Indicates interference.
+    /// At very far north latitudes, this is a problem.
+    pub mag_incl_max: f32,
     /// If estimated linear acceleration magnitude is greater than this, don't update gyro
     /// from acc.
     pub lin_acc_thresh: f32, // m/s^2
@@ -78,9 +81,6 @@ pub struct AhrsConfig {
     /// In seconds. If the most recent fix is older than this, don't use it.
     pub max_fix_age_lin_acc: f32,
     pub orientation: DeviceOrientation,
-    /// If estimated mag incl is > this, don't update. Indicates interference.
-    /// At very far north latitudes, this is a problem.
-    pub max_mag_incl: f32,
 }
 
 impl Default for AhrsConfig {
@@ -93,7 +93,8 @@ impl Default for AhrsConfig {
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
-            lin_acc_thresh: 0.3,     // m/s^2
+            mag_incl_max: 1.35,
+            lin_acc_thresh: 0.3, // m/s^2
             start_alignment_time: 2,
             alignment_duration: 2,
             mag_cal_timestep: 0.05,
@@ -104,7 +105,6 @@ impl Default for AhrsConfig {
             // update_amt_mag_cal: 0.5,
             max_fix_age_lin_acc: 0.5,
             orientation: Default::default(),
-            max_mag_incl: 1.35,
         }
     }
 }
