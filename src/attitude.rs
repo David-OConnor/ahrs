@@ -287,6 +287,21 @@ impl Ahrs {
         // Fuse with mag data if available.
         if let Some(mag) = mag_data {
             self.handle_mag(mag, &mut att_fused);
+
+            // todo: Our att-from-mag is missing heading information. FOr now,
+            // todo this works.
+            // todo: Only apply this if mag is healthy!! And don't apply the whole thing;
+            let mag_norm = self.mag_calibrated.unwrap().to_normalized();
+            let hdg = mag_norm.x.atan2(mag_norm.y);
+
+            // todo: Take the update update if not initialized.
+            let rot_correction = Quaternion::from_axis_angle(UP, hdg);
+            // let rot_correction = Quaternion::from_axis_angle(UP, hdg) * 1. * dt;
+
+            att_fused = rot_correction * att_fused;
+
+            let rotator = Quaternion::from_axis_angle(UP, hdg);
+            // self.attitude_fused = 
         }
 
         // These variables here are only used to inspect and debug.

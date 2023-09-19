@@ -96,8 +96,10 @@ impl AhrsCal {
 
         const EPS: f32 = 0.0000001;
 
+        println!("\nMag cal complete\n");
+
         let mut i = 0;
-        println!("\n\n\n[");
+        // println!("\n\n\n[");
         for data in &[self.mag_cal_data_up, self.mag_cal_data_fwd] {
             for cat in data {
                 for point in cat {
@@ -106,12 +108,12 @@ impl AhrsCal {
                     }
 
                     sample_pts[i] = *point;
-                    println!("({}, {}, {}),", point.x, point.y, point.z);
+                    // println!("({}, {}, {}),", point.x, point.y, point.z);
                     i += 1;
                 }
             }
         }
-        println!("]");
+        // println!("]");
 
         // todo: Put back once working.
 
@@ -121,20 +123,20 @@ impl AhrsCal {
         // self.hard_iron = center;
         // self.soft_iron = inve;
 
-        println!(
-            "Hard iron: x{} y{} z{}",
-            hard_iron.x, hard_iron.y, hard_iron.z
-        );
+        // println!(
+        //     "Hard iron: x{} y{} z{}",
+        //     hard_iron.x, hard_iron.y, hard_iron.z
+        // );
 
-        println!(
-            "Soft iron diag: {} {} {} {} {} {}",
-            soft_iron.data[0],
-            soft_iron.data[1],
-            soft_iron.data[2],
-            soft_iron.data[4],
-            soft_iron.data[5],
-            soft_iron.data[8]
-        );
+        // println!(
+        //     "Soft iron diag: {} {} {} {} {} {}",
+        //     soft_iron.data[0],
+        //     soft_iron.data[1],
+        //     soft_iron.data[2],
+        //     soft_iron.data[4],
+        //     soft_iron.data[5],
+        //     soft_iron.data[8]
+        // );
 
         let update_amt_inv = 1. - update_amt;
 
@@ -182,6 +184,18 @@ impl Ahrs {
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
         self.att_from_mag = Some(att_mag);
+
+
+
+        // todo: Experimenting.
+        // let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
+        // let hdg = (mag_horizontal.dot(FORWARD)).acos();
+
+        // if self.num_updates % 100 == 0 {
+        //     println!("HDG {} mag hor x{} y{} z{}", hdg, mag_horizontal.x, mag_horizontal.y, mag_horizontal.z);
+        // }
+        // let hdg = mag_norm.x.atan2(mag_norm.y);
+        // let rotator = 
 
         if !self.initialized {
             let rot_correction = make_nudge(self.attitude, mag_norm, mag_field_absolute, 0.5);
@@ -309,7 +323,36 @@ impl Ahrs {
 /// The magnetic field vector points points towards magnetic earth, and into the earth IOC inlination.
 /// It is points forward and down in our coordinate system.
 pub fn att_from_mag(mag_norm: Vec3, mag_field_vec_absolute: Vec3) -> Quaternion {
+
+    static mut i: u32 = 0;
+    unsafe {
+        i += 1;
+        if false {
+        // if i % 100 == 0 {
+            println!("mag: x{} y{} z{} ref: x{}y {} z{}", mag_norm.x, mag_norm.y, mag_norm.z,
+             mag_field_vec_absolute.x, mag_field_vec_absolute.y, mag_field_vec_absolute.z);
+        }
+
+        // if i % 100 == 0 {
+        //     let hdg = mag_norm.x.atan2(mag_norm.y);
+        //     println!("HDG: {:?}", hdg);
+        // }
+        
+    }
+
+    // todo: Experimenting.
+    // let hdg = mag_norm.x.atan2(mag_norm.y);
+    // todo: Why is this not capturing heading information, but captures pitch/roll well?
+    // let att_mag = Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm);
+
+    // todo: Let's try matching forward to forward. (?)
+
+    let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
+    // let For
+
+
     Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm)
+    // Quaternion::from_unit_vecs(FORWARD, mag_horizontal)
 }
 
 /// todo: Put this in a separate module A/R
