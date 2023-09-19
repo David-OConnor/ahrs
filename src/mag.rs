@@ -229,8 +229,8 @@ impl Ahrs {
 
             *att_fused = rot_correction_from_att * rot_correction_from_heading * *att_fused;
 
-            // if self.num_updates % ((1. / self.dt) as u32) == 0 { 
-            if false {
+            if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
                 println!("HDG: {:?}", hdg);
                 print_quat(heading_rotation, "HDG ROT");
                 println!(" FWD mag: x{} y{}", hdg.sin(), hdg.cos());
@@ -243,8 +243,8 @@ impl Ahrs {
 
         self.update_mag_incl(mag_norm);
 
-        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
+        if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            // if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
