@@ -183,31 +183,6 @@ impl Ahrs {
 
         self.att_from_mag = Some(att_mag);
 
-        // We extract the pure heading from the magnetometer, since that is what we primarily don't get
-        // from the accelerometer, and we only get a small part from the magnetometer directly.
-
-        // todo: We don't want just acc here, due to linear-acc problems, but do it for now to test.
-        let tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag_norm);
-        let hdg = tilt_compensated.x.atan2(tilt_compensated.y);
-
-
-        let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
-        // let hdg = (mag_horizontal.dot(FORWARD)).acos();
-
-        if self.num_updates % 100 == 0 {
-            // println!("HDG {} mag hor x{} y{} z{}", hdg, mag_horizontal.x, mag_horizontal.y, mag_horizontal.z);
-            println!("HDG {} tilt comp x{} y{} z{}", hdg, tilt_compensated.x, tilt_compensated.y, tilt_compensated.z);
-        }
-
-        // let rotator = 
-
-        // if !self.initialized {
-        //     let rot_correction = make_nudge(self.attitude, mag_norm, mag_field_absolute, 0.5);
-        //
-        //     *att_fused = rot_correction * *att_fused;
-        //     return;
-        // }
-
         let magnetometer_magnitude = mag.magnitude(); // Say that 10 times fast?
 
         let update_amt_mag_var = 0.10 * self.dt; // todo: Store this const as a struct param.
@@ -228,20 +203,48 @@ impl Ahrs {
         }
 
         if update_gyro_from_mag {
-            let rot_correction = make_nudge(
+            let rot_correction_from_att = make_nudge(
                 self.attitude,
                 mag_norm,
                 mag_field_absolute,
                 self.config.update_amt_att_from_mag * self.dt,
             );
 
-            *att_fused = rot_correction * *att_fused;
+
+            // We extract the pure heading from the magnetometer, since that is what we primarily don't get
+            // from the accelerometer, and we only get a small part from the magnetometer directly.
+
+            // todo: We don't want just acc here, due to linear-acc problems, but do it for now to test.
+            let tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag_norm);
+            let hdg = tilt_compensated.x.atan2(tilt_compensated.y);
+
+            let heading_rotation = Quaternion::from_unit_vecs(
+                att_fused.rotate_vec(FORWARD).project_to_plane(UP),
+                Vec3::new(hdg.sin(), hdg.cos(), 0.),
+            );
+
+            // todo: make sure you apply an instantaneous correction on init.
+            let rot_correction_from_heading = Quaternion::new_identity().slerp(heading_rotation, 
+                self.config.update_amt_hdg_from_mag * self.dt);
+
+            *att_fused = rot_correction_from_att * rot_correction_from_heading * *att_fused;
+
+            // if self.num_updates % ((1. / self.dt) as u32) == 0 { 
+            if false {
+                println!("HDG: {:?}", hdg);
+                print_quat(heading_rotation, "HDG ROT");
+                println!(" FWD mag: x{} y{}", hdg.sin(), hdg.cos());
+
+                let a = att_fused.rotate_vec(FORWARD).project_to_plane(UP);
+                println!(" FWD att: x{} y{} z: {}", a.x, a.y, a.z);
+                // print_quat(rot_correction_from_heading * self.att_from_mag.unwrap(), "Att mag w hdg");
+            }
         }
 
         self.update_mag_incl(mag_norm);
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -294,7 +297,9 @@ impl Ahrs {
                 );
             } else {
                 // Take the full update on the first run.
-                self.mag_inclination_estimate = inclination_estimate;
+                // todo: That doesn't appear to work; showing 0 start. use a sane default.
+                self.mag_inclination_estimate = 1.2;
+                // self.mag_inclination_estimate = inclination_estimate;
             }
         }
     }

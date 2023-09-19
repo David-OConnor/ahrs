@@ -40,6 +40,7 @@ pub struct AhrsConfig {
     /// This should be lower than the amount we update from acc, but enough to overcome
     /// drift, and not be overwhelmed by the AC's update.
     pub update_amt_att_from_mag: f32,
+    pub update_amt_hdg_from_mag: f32,
     /// Affects how much gyro biases are updated from the accelerometer-based angular rate
     /// estimation. This should be relatively low, since we don't expect the bias to change much,
     /// and the acc readings are noisy, but stable over time.
@@ -89,7 +90,8 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 1.5,
+            update_amt_att_from_mag: 1.0,
+            update_amt_hdg_from_mag: 0.1,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
