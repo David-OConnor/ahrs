@@ -89,7 +89,7 @@ impl Default for AhrsConfig {
             lin_bias_lookback: 10.,
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
-            update_amt_att_from_mag: 2.3,
+            update_amt_att_from_mag: 1.5,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
@@ -124,6 +124,8 @@ pub struct AhrsCal {
     pub hard_iron: Vec3,
     pub soft_iron: Mat3,
     pub mag_cal_updated: bool,
+    // /// Until we sort out pure-attitude
+    // pub mag_heading: f32,
     /// Magenetometer cal data, per attitude category.
     pub(crate) mag_cal_data_up: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
     pub(crate) mag_cal_data_fwd: [[Vec3; MAG_SAMPLES_PER_CAT]; SAMPLE_VERTICES.len()],
@@ -282,26 +284,9 @@ impl Ahrs {
         // todo: Temporarily only using acc for lin accel estimate
         self.lin_acc_fused = self.lin_acc_gyro;
 
-        // todo: FIgure out what here should have IIR lowpass filters aplied.
-
         // Fuse with mag data if available.
         if let Some(mag) = mag_data {
             self.handle_mag(mag, &mut att_fused);
-
-            // todo: Our att-from-mag is missing heading information. FOr now,
-            // todo this works.
-            // todo: Only apply this if mag is healthy!! And don't apply the whole thing;
-            let mag_norm = self.mag_calibrated.unwrap().to_normalized();
-            let hdg = mag_norm.x.atan2(mag_norm.y);
-
-            // todo: Take the update update if not initialized.
-            let rot_correction = Quaternion::from_axis_angle(UP, hdg);
-            // let rot_correction = Quaternion::from_axis_angle(UP, hdg) * 1. * dt;
-
-            att_fused = rot_correction * att_fused;
-
-            let rotator = Quaternion::from_axis_angle(UP, hdg);
-            // self.attitude_fused = 
         }
 
         // These variables here are only used to inspect and debug.

@@ -155,6 +155,12 @@ impl AhrsCal {
 }
 
 impl Ahrs {
+    /// We use magnetometer information in two ways. Note that its ambiguity axis is close to
+    /// the ambitguity access of the accelerometer, but it provides some heading information, while
+    /// the acc provides none. We apply corrections in two ways:
+    ///
+    /// 1: Create an attitude using the assessed inclination vector, and the magnetometer reading.
+    /// 2: Extract heading directly, and apply a correction: This is our primary absolute heading reference.
     pub(crate) fn handle_mag(&mut self, mag_raw: Vec3, att_fused: &mut Quaternion) {
         let mag = self.cal.apply_cal_mag(mag_raw);
         self.mag_calibrated = Some(mag);
@@ -170,38 +176,37 @@ impl Ahrs {
         let incl_rot = Quaternion::from_axis_angle(RIGHT, -self.mag_inclination_estimate);
         let mag_field_absolute = incl_rot.rotate_vec(FORWARD);
 
-        // todo: QC order; trial_error
-        // let up_rel_earth = att_fused.rotate_vec(UP); // todo: QC this!
-        // todo: QC direction.
-        // let declination_correction = Quaternion::from_axis_angle(up_rel_earth, self.mag_declination).to_normalized();
-        // let declination_amt = self.mag_declination.co
-        // let declination_correction = Quaternion::from_axis_angle(UP, self.mag_declination).to_normalized();
-
-        // todo: Come back to this.
-        // println!("DC: {:?}", declination_correction.w);
-        // let declination_correction = Quaternion::new_identity();
-
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
+
+        // todo
+        // let att_mag = apply_declination(att_fused, declination);
+
         self.att_from_mag = Some(att_mag);
 
+        // We extract the pure heading from the magnetometer, since that is what we primarily don't get
+        // from the accelerometer, and we only get a small part from the magnetometer directly.
+
+        // todo: We don't want just acc here, due to linear-acc problems, but do it for now to test.
+        let tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag_norm);
+        let hdg = tilt_compensated.x.atan2(tilt_compensated.y);
 
 
-        // todo: Experimenting.
-        // let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
+        let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
         // let hdg = (mag_horizontal.dot(FORWARD)).acos();
 
-        // if self.num_updates % 100 == 0 {
-        //     println!("HDG {} mag hor x{} y{} z{}", hdg, mag_horizontal.x, mag_horizontal.y, mag_horizontal.z);
-        // }
-        // let hdg = mag_norm.x.atan2(mag_norm.y);
+        if self.num_updates % 100 == 0 {
+            // println!("HDG {} mag hor x{} y{} z{}", hdg, mag_horizontal.x, mag_horizontal.y, mag_horizontal.z);
+            println!("HDG {} tilt comp x{} y{} z{}", hdg, tilt_compensated.x, tilt_compensated.y, tilt_compensated.z);
+        }
+
         // let rotator = 
 
-        if !self.initialized {
-            let rot_correction = make_nudge(self.attitude, mag_norm, mag_field_absolute, 0.5);
-
-            *att_fused = rot_correction * *att_fused;
-            return;
-        }
+        // if !self.initialized {
+        //     let rot_correction = make_nudge(self.attitude, mag_norm, mag_field_absolute, 0.5);
+        //
+        //     *att_fused = rot_correction * *att_fused;
+        //     return;
+        // }
 
         let magnetometer_magnitude = mag.magnitude(); // Say that 10 times fast?
 
@@ -260,30 +265,7 @@ impl Ahrs {
         }
 
         if self.num_updates % self.config.update_ratio_mag_cal_log as u32 == 0 {
-            self.cal.log_mag_cal_pt(self.attitude, mag_raw);
-
-            // If we've filled up most of our sample slots, divided by directional category, initiate cal.
-            // Note that additional samples in a filled cat don't count towards this value.
-            let mut samples_taken = 0;
-
-            for cat_count in self.cal.mag_sample_count_up {
-                samples_taken += cat_count;
-            }
-            for cat_count in self.cal.mag_sample_count_fwd {
-                samples_taken += cat_count;
-            }
-
-            if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
-            {
-                // Ie, if the recent magnetometer magnitude is too high, take all or almost all of the update.
-                // todo: Store these consts in the main struct?
-                let mut update_amt_mag_cal =
-                    map_linear(self.recent_mag_variance, (0., 0.3), (0.1, 1.));
-                if update_amt_mag_cal > 1. {
-                    update_amt_mag_cal = 1.;
-                }
-                self.cal.update_mag_cal(update_amt_mag_cal);
-            }
+            self.update_mag_cal(mag_raw);
         }
     }
 
@@ -316,6 +298,35 @@ impl Ahrs {
             }
         }
     }
+
+    /// Log a magnetic calibration point. Check if we've logged enough points to apply the calibration,
+    /// and do if we do.
+    fn update_mag_cal(&mut self, mag_raw: Vec3) {
+        self.cal.log_mag_cal_pt(self.attitude, mag_raw);
+
+        // If we've filled up most of our sample slots, divided by directional category, initiate cal.
+        // Note that additional samples in a filled cat don't count towards this value.
+        let mut samples_taken = 0;
+
+        for cat_count in self.cal.mag_sample_count_up {
+            samples_taken += cat_count;
+        }
+        for cat_count in self.cal.mag_sample_count_fwd {
+            samples_taken += cat_count;
+        }
+
+        if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
+        {
+            // Ie, if the recent magnetometer magnitude is too high, take all or almost all of the update.
+            // todo: Store these consts in the main struct?
+            let mut update_amt_mag_cal =
+                map_linear(self.recent_mag_variance, (0., 0.3), (0.1, 1.));
+            if update_amt_mag_cal > 1. {
+                update_amt_mag_cal = 1.;
+            }
+            self.cal.update_mag_cal(update_amt_mag_cal);
+        }
+    }
 }
 
 /// Estimate attitude from magnetometer. This will fail when experiencing magnetic
@@ -323,40 +334,20 @@ impl Ahrs {
 /// The magnetic field vector points points towards magnetic earth, and into the earth IOC inlination.
 /// It is points forward and down in our coordinate system.
 pub fn att_from_mag(mag_norm: Vec3, mag_field_vec_absolute: Vec3) -> Quaternion {
-
-    static mut i: u32 = 0;
-    unsafe {
-        i += 1;
-        if false {
-        // if i % 100 == 0 {
-            println!("mag: x{} y{} z{} ref: x{}y {} z{}", mag_norm.x, mag_norm.y, mag_norm.z,
-             mag_field_vec_absolute.x, mag_field_vec_absolute.y, mag_field_vec_absolute.z);
-        }
-
-        // if i % 100 == 0 {
-        //     let hdg = mag_norm.x.atan2(mag_norm.y);
-        //     println!("HDG: {:?}", hdg);
-        // }
-        
-    }
-
-    // todo: Experimenting.
-    // let hdg = mag_norm.x.atan2(mag_norm.y);
-    // todo: Why is this not capturing heading information, but captures pitch/roll well?
-    // let att_mag = Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm);
-
-    // todo: Let's try matching forward to forward. (?)
-
-    let mag_horizontal = mag_norm.project_to_plane(Vec3::new(0., 0., 1.)).to_normalized();
-    // let For
-
-
     Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm)
-    // Quaternion::from_unit_vecs(FORWARD, mag_horizontal)
 }
 
 /// todo: Put this in a separate module A/R
 /// Estimate magnetic inclination, by looking up from a table based on geographic position.
 fn declination_from_posit(lat_e8: i64, lon_e8: i64) -> f32 {
     0.
+}
+
+// todo: Make this work, then use it.
+fn apply_declination(att: Quaternion, declination: f32) -> Quaternion {
+    // todo: QC order; trial_error
+    let up_rel_earth = att.rotate_vec(UP); // todo: QC this!
+    // todo: QC direction.
+    Quaternion::from_axis_angle(up_rel_earth, declination).to_normalized() * att
+    // Quaternion::from_axis_angle(UP, declination).to_normalized() * att
 }
