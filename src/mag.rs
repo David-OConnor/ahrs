@@ -205,11 +205,11 @@ impl Ahrs {
         if update_gyro_from_mag {
             let rot_correction_from_att = make_nudge(
                 self.attitude,
+                // *att_fused,
                 mag_norm,
                 mag_field_absolute,
                 self.config.update_amt_att_from_mag * self.dt,
             );
-
 
             // We extract the pure heading from the magnetometer, since that is what we primarily don't get
             // from the accelerometer, and we only get a small part from the magnetometer directly.
