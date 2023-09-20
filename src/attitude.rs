@@ -91,7 +91,7 @@ impl Default for AhrsConfig {
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
             update_amt_att_from_mag: 1.0,
-            update_amt_hdg_from_mag: 0.2,
+            update_amt_hdg_from_mag: 0.05,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
