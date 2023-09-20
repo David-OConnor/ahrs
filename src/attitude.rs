@@ -91,7 +91,9 @@ impl Default for AhrsConfig {
             // mag_gyro_diff_thresh: 0.01,
             update_amt_att_from_acc: 3.,
             update_amt_att_from_mag: 1.0,
-            update_amt_hdg_from_mag: 0.3,
+            // Note: We want a low update amount, but experience precision
+            // problems if it's too low.
+            update_amt_hdg_from_mag: 0.1,
             update_amt_gyro_bias_from_acc: 0.10,
             total_accel_thresh: 1.0, // m/s^2
             total_mag_thresh: 0.3,   // rel to 1
@@ -336,8 +338,8 @@ impl Ahrs {
             self.initialized = true;
         }
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            //     if false {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+                if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");

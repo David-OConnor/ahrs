@@ -205,11 +205,11 @@ impl Ahrs {
         if update_gyro_from_mag {
             let rot_correction_from_att = make_nudge(
                 self.attitude,
+                // *att_fused,
                 mag_norm,
                 mag_field_absolute,
                 self.config.update_amt_att_from_mag * self.dt,
             );
-
 
             // We extract the pure heading from the magnetometer, since that is what we primarily don't get
             // from the accelerometer, and we only get a small part from the magnetometer directly.
@@ -224,13 +224,15 @@ impl Ahrs {
             );
 
             // todo: make sure you apply an instantaneous correction on init.
-            let rot_correction_from_heading = Quaternion::new_identity().slerp(heading_rotation, 
-                self.config.update_amt_hdg_from_mag * self.dt);
+            let rot_correction_from_heading = Quaternion::new_identity().slerp(
+                heading_rotation,
+                self.config.update_amt_hdg_from_mag * self.dt,
+            );
 
             *att_fused = rot_correction_from_att * rot_correction_from_heading * *att_fused;
 
-            if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+            // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            if false {
                 println!("HDG: {:?}", hdg);
                 print_quat(heading_rotation, "HDG ROT");
                 println!(" FWD mag: x{} y{}", hdg.sin(), hdg.cos());
@@ -243,8 +245,8 @@ impl Ahrs {
 
         self.update_mag_incl(mag_norm);
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            // if false {
+        // if self.num_updates % ((1. / self.dt) as u32) == 0 {
+            if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -320,12 +322,10 @@ impl Ahrs {
             samples_taken += cat_count;
         }
 
-        if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req
-        {
+        if samples_taken as f32 / TOTAL_MAG_SAMPLE_PTS as f32 >= self.config.mag_cal_portion_req {
             // Ie, if the recent magnetometer magnitude is too high, take all or almost all of the update.
             // todo: Store these consts in the main struct?
-            let mut update_amt_mag_cal =
-                map_linear(self.recent_mag_variance, (0., 0.3), (0.1, 1.));
+            let mut update_amt_mag_cal = map_linear(self.recent_mag_variance, (0., 0.3), (0.1, 1.));
             if update_amt_mag_cal > 1. {
                 update_amt_mag_cal = 1.;
             }
@@ -352,7 +352,7 @@ fn declination_from_posit(lat_e8: i64, lon_e8: i64) -> f32 {
 fn apply_declination(att: Quaternion, declination: f32) -> Quaternion {
     // todo: QC order; trial_error
     let up_rel_earth = att.rotate_vec(UP); // todo: QC this!
-    // todo: QC direction.
+                                           // todo: QC direction.
     Quaternion::from_axis_angle(up_rel_earth, declination).to_normalized() * att
     // Quaternion::from_axis_angle(UP, declination).to_normalized() * att
 }
