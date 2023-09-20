@@ -278,10 +278,6 @@ impl Ahrs {
 
         let mut att_fused = att_from_gyro(gyro_calibrated, self.attitude, self.dt);
 
-        if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            print_quat(att_fused, "Att Gyro");
-        }
-
         self.handle_acc(accel_data, &mut att_fused);
         // todo: Temporarily only using acc for lin accel estimate
         self.lin_acc_fused = self.lin_acc_gyro;

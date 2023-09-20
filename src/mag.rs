@@ -219,7 +219,7 @@ impl Ahrs {
             let hdg = tilt_compensated.x.atan2(tilt_compensated.y);
 
             let heading_rotation = Quaternion::from_unit_vecs(
-                att_fused.rotate_vec(FORWARD).project_to_plane(UP),
+                self.attitude.rotate_vec(FORWARD).project_to_plane(UP),
                 Vec3::new(hdg.sin(), hdg.cos(), 0.),
             );
 
