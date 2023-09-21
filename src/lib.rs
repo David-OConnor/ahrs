@@ -15,12 +15,11 @@ mod acc;
 pub mod attitude;
 mod linear_acc;
 mod mag;
+mod mag_decl_table;
 mod mag_ellipsoid_fitting;
 pub mod params;
 pub mod ppks;
 mod util;
-
-// mod filter;
 
 pub use crate::{attitude::Ahrs, params::Params};
 
@@ -182,4 +181,10 @@ pub fn print_quat(quat: Quaternion, name: &str) {
 pub(crate) fn blend(val0: f32, val1: f32, amount: f32) -> f32 {
     let amount_inv = 1. - amount;
     val0 * amount_inv + val1 * amount
+}
+
+/// todo: Put this in a separate module A/R
+/// Estimate magnetic inclination, by looking up from a table based on geographic position.
+fn declination_from_posit(lat_e8: i64, lon_e8: i64) -> f32 {
+    0.
 }

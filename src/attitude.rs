@@ -1,12 +1,6 @@
 //! Calculate attitude gven a 9-axis IMU.
 //!
 //!
-//! todo: Use magnetic inclination, declination, and strength
-
-// todo: Calibrate mag and acc based on known gravity value, and known magnetic strength at the current
-// todo position, if known.
-
-// todo: We are currently moving away from the AHRS Fusion port.
 
 use num_traits::float::Float; // abs etc
 
@@ -17,7 +11,7 @@ use lin_alg2::f32::{Mat3, Quaternion, Vec3};
 use defmt::println;
 
 use crate::{
-    blend, linear_acc,
+    blend, linear_acc, mag_decl_table,
     mag_ellipsoid_fitting::{MAG_SAMPLES_PER_CAT, SAMPLE_VERTICES},
     print_quat, DeviceOrientation, Fix, FORWARD, G, RIGHT, UP,
 };
@@ -233,7 +227,7 @@ pub struct Ahrs {
     // /// Radians
     // pub mag_inclination: f32, // todo: Replace with inc estimate above once that's working.
     /// Positive means "east" declination. radians.
-    pub(crate) mag_declination: f32,
+    pub mag_declination: f32,
     /// We use this location for updating linear acceleration using GNSS
     /// todo: You may need a list of several to use the arc-radius approach.
     pub(crate) fix_prev: Option<Fix>,
@@ -339,7 +333,7 @@ impl Ahrs {
         }
 
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-                if false {
+        if false {
             // println!("Alignment: {}", acc_gyro_alignment);
 
             print_quat(self.attitude, "\n\nAtt fused");
@@ -469,6 +463,11 @@ impl Ahrs {
                 self.lin_acc_gnss = Some(linear_acc::from_gnss(fix, fix_prev, self.attitude));
             }
         }
+
+        self.mag_declination = mag_decl_table::estimate_declination(
+            fix.lat_e7 as f32 / 10_000_000.,
+            fix.lon_e7 as f32 / 10_000_000.,
+        );
 
         self.fix_prev = Some(fix.clone());
         // todo: Perhaps

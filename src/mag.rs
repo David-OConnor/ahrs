@@ -17,7 +17,6 @@ use crate::{
     mag_ellipsoid_fitting::{
         self, MAG_SAMPLES_PER_CAT, SAMPLE_VERTEX_ANGLE, SAMPLE_VERTICES, TOTAL_MAG_SAMPLE_PTS,
     },
-    ppks::PositVelEarthUnits,
     print_quat,
     util::map_linear,
     FORWARD, RIGHT, UP,
@@ -178,9 +177,6 @@ impl Ahrs {
 
         let att_mag = att_from_mag(mag_norm, mag_field_absolute);
 
-        // todo
-        // let att_mag = apply_declination(att_fused, declination);
-
         self.att_from_mag = Some(att_mag);
 
         let magnetometer_magnitude = mag.magnitude(); // Say that 10 times fast?
@@ -216,7 +212,9 @@ impl Ahrs {
 
             // todo: We don't want just acc here, due to linear-acc problems, but do it for now to test.
             let tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag_norm);
-            let hdg = tilt_compensated.x.atan2(tilt_compensated.y);
+
+            // todo: QC +/-
+            let hdg = tilt_compensated.x.atan2(tilt_compensated.y) + self.mag_declination;
 
             let heading_rotation = Quaternion::from_unit_vecs(
                 self.attitude.rotate_vec(FORWARD).project_to_plane(UP),
@@ -246,7 +244,7 @@ impl Ahrs {
         self.update_mag_incl(mag_norm);
 
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
-            if false {
+        if false {
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -340,19 +338,4 @@ impl Ahrs {
 /// It is points forward and down in our coordinate system.
 pub fn att_from_mag(mag_norm: Vec3, mag_field_vec_absolute: Vec3) -> Quaternion {
     Quaternion::from_unit_vecs(mag_field_vec_absolute, mag_norm)
-}
-
-/// todo: Put this in a separate module A/R
-/// Estimate magnetic inclination, by looking up from a table based on geographic position.
-fn declination_from_posit(lat_e8: i64, lon_e8: i64) -> f32 {
-    0.
-}
-
-// todo: Make this work, then use it.
-fn apply_declination(att: Quaternion, declination: f32) -> Quaternion {
-    // todo: QC order; trial_error
-    let up_rel_earth = att.rotate_vec(UP); // todo: QC this!
-                                           // todo: QC direction.
-    Quaternion::from_axis_angle(up_rel_earth, declination).to_normalized() * att
-    // Quaternion::from_axis_angle(UP, declination).to_normalized() * att
 }
