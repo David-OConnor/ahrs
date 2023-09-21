@@ -214,7 +214,7 @@ impl Ahrs {
             let tilt_compensated = self.att_from_acc.inverse().rotate_vec(mag_norm);
 
             // todo: QC +/-
-            let hdg = tilt_compensated.x.atan2(tilt_compensated.y) + self.mag_declination;
+            let hdg = tilt_compensated.x.atan2(tilt_compensated.y) - self.mag_declination;
 
             let heading_rotation = Quaternion::from_unit_vecs(
                 self.attitude.rotate_vec(FORWARD).project_to_plane(UP),
