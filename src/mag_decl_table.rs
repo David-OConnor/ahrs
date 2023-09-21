@@ -1,3 +1,4 @@
+use core::f32::consts::TAU;
 use num_traits::Float;
 
 // todo: Update the table; it's from 2012
@@ -172,7 +173,7 @@ const LUT: [i8; 13 * 37] = [
         13,7,0,-7,-12,-15,-14,-11,-6,-1,3
 ];
 
-/// lat and lon here are in degrees.
+/// lat and lon input here are in degrees. The result is in radians.
 pub fn estimate_declination(lat: f32, lon: f32) -> f32 {
     /*
         lookup declination values from 10 x 10 degree grid and return approximate declination for (lat,lon)
@@ -231,5 +232,6 @@ pub fn estimate_declination(lat: f32, lon: f32) -> f32 {
     let decmin = (lon - lonmin) / 10. * (dec_se - dec_sw) + dec_sw;
     let decmax = (lon - lonmin) / 10. * (dec_ne - dec_nw) + dec_nw;
 
-    (lat - latmin) / 10. * (decmax - decmin) + decmin
+    let result_deg = (lat - latmin) / 10. * (decmax - decmin) + decmin;
+    result_deg * TAU / 360.
 }
