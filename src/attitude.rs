@@ -250,8 +250,7 @@ impl Ahrs {
     pub fn new(dt: f32, orientation: DeviceOrientation) -> Self {
         Self {
             dt,
-            mag_declination: -0.032, // Raleigh
-            // mag_declination: 6.28 / 8., // todo: testing
+            mag_declination: 0.,
             mag_inclination_estimate: 1.2,
             config: AhrsConfig {
                 orientation,
