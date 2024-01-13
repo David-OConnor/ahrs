@@ -56,13 +56,13 @@ impl Default for Filters {
 impl Filters {
     /// Apply the filters to IMU readings, modifying in place. Block size = 1.
     pub fn apply(&mut self, gnss_acc: &mut Vec3) {
-        gnss_acc.a_x = filter_one(&mut self.accel_gnss_x, gnss_acc.a_x);
-        gnss_acc.a_y = filter_one(&mut self.accel_gnss_y, gnss_acc.a_y);
-        gnss_acc.a_z = filter_one(&mut self.accel_gnss_z, gnss_acc.a_z);
+        gnss_acc.a_x = iir_apply(&mut self.accel_gnss_x, gnss_acc.a_x);
+        gnss_acc.a_y = iir_apply(&mut self.accel_gnss_y, gnss_acc.a_y);
+        gnss_acc.a_z = iir_apply(&mut self.accel_gnss_z, gnss_acc.a_z);
     }
 }
 
 /// Helper fn to reduce repetition. Applies an IIR filter to a single value.
-pub fn filter_one(filter: &mut IirInstWrapper, value: f32) -> f32 {
+pub fn iir_apply(filter: &mut IirInstWrapper, value: f32) -> f32 {
     dsp_api::iir_apply(&mut filter.inner, value)
 }
