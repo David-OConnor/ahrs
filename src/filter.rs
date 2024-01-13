@@ -81,16 +81,20 @@ impl Default for Filters {
 impl Filters {
     /// Apply the filters to IMU readings, modifying in place. Block size = 1.
     pub fn apply(&mut self, gnss_acc: &mut Vec3) {
-        let mut a_gnss_x = [0.];
-        let mut a_gnss_y = [0.];
-        let mut a_gnss_z = [0.];
-
-        dsp_api::biquad_cascade_df1_f32(&mut self.accel_gnss_x.inner, &[gnss_acc.a_x], &mut a_gnss_x, BLOCK_SIZE);
-        dsp_api::biquad_cascade_df1_f32(&mut self.accel_gnss_y.inner, &[gnss_acc.a_y], &mut a_gnss_y, BLOCK_SIZE);
-        dsp_api::biquad_cascade_df1_f32(&mut self.accel_gnss_z.inner, &[gnss_acc.a_z], &mut a_gnss_z, BLOCK_SIZE);
-
-        gnss_acc.a_x = a_gnss_x[0];
-        gnss_acc.a_y = a_gnss_y[0];
-        gnss_acc.a_z = a_gnss_z[0];
+        gnss_acc.a_x = filter_one(&mut self.accel_gnss_x, gnss_acc.a_x);
+        gnss_acc.a_y = filter_one(&mut self.accel_gnss_y, gnss_acc.a_y);
+        gnss_acc.a_z = filter_one(&mut self.accel_gnss_z, gnss_acc.a_z);
     }
+}
+
+/// Helper fn to reduce repetition. Applies an IIR filter to a single value.
+pub fn filter_one(filter: &mut IirInstWrapper, value: f32) -> f32 {
+    let mut out_buf = [0.];
+    dsp_api::biquad_cascade_df1_f32(
+        &mut filter.inner,
+        &[value],
+        &mut out_buf,
+        BLOCK_SIZE,
+    );
+    out_buf[0]
 }

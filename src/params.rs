@@ -92,7 +92,6 @@ impl Params {
                 (accel_data, gyro_data, mag_data)
             }
             DeviceOrientation::YLeftXFwd => {
-                // todo: QC you don't have x and y sign reversed.
                 let accel_data = Vec3 {
                     x: -imu_readings.a_y,
                     y: imu_readings.a_x,
