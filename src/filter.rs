@@ -43,38 +43,13 @@ pub struct Filters {
 
 impl Default for Filters {
     fn default() -> Self {
-        let mut result = Self {
-            accel_gnss_x: IirInstWrapper {
-                inner: dsp_api::biquad_cascade_df1_init_empty_f32(),
-            },
-            accel_gnss_y: IirInstWrapper {
-                inner: dsp_api::biquad_cascade_df1_init_empty_f32(),
-            },
-            accel_gnss_z: IirInstWrapper {
-                inner: dsp_api::biquad_cascade_df1_init_empty_f32(),
-            },
-        };
-
         unsafe {
-            // todo: Re-initialize fn?
-            dsp_api::biquad_cascade_df1_init_f32(
-                &mut result.accel_gnss_x.inner,
-                &COEFFS_LP_GNSS_ACCEL,
-                &mut FILTER_STATE_GNSS_ACCEL_X,
-            );
-            dsp_api::biquad_cascade_df1_init_f32(
-                &mut result.accel_gnss_y.inner,
-                &COEFFS_LP_GNSS_ACCEL,
-                &mut FILTER_STATE_GNSS_ACCEL_Y,
-            );
-            dsp_api::biquad_cascade_df1_init_f32(
-                &mut result.accel_gnss_z.inner,
-                &COEFFS_LP_GNSS_ACCEL,
-                &mut FILTER_STATE_GNSS_ACCEL_Z,
-            );
+            Self {
+                accel_gnss_x: IirInstWrapper { inner: iir_new(&COEFFS_LP_GNSS_ACCEL, &mut FILTER_STATE_GNSS_ACCEL_X, ) },
+                accel_gnss_y: IirInstWrapper { inner: iir_new(&COEFFS_LP_GNSS_ACCEL, &mut FILTER_STATE_GNSS_ACCEL_Y, ) },
+                accel_gnss_z: IirInstWrapper { inner: iir_new(&COEFFS_LP_GNSS_ACCEL, &mut FILTER_STATE_GNSS_ACCEL_Z, ) },
+            }
         }
-
-        result
     }
 }
 
@@ -89,12 +64,5 @@ impl Filters {
 
 /// Helper fn to reduce repetition. Applies an IIR filter to a single value.
 pub fn filter_one(filter: &mut IirInstWrapper, value: f32) -> f32 {
-    let mut out_buf = [0.];
-    dsp_api::biquad_cascade_df1_f32(
-        &mut filter.inner,
-        &[value],
-        &mut out_buf,
-        BLOCK_SIZE,
-    );
-    out_buf[0]
+    dsp_api::iir_apply(&mut filter.inner, value)
 }
