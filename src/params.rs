@@ -32,7 +32,7 @@ pub struct Params {
     // pub s_yaw_heading: f32,
     /// Quaternion of the attitude.
     pub attitude: Quaternion,
-    // todo: AHRS quaternion field, or leave that as part of the `AHRS` struct?
+    /// Linear acceleration, in m/s^2, relative to the AHRS.
     pub accel_linear: Vec3,
     // todo: Vec3 for these?
 

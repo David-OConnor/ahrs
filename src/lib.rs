@@ -21,11 +21,14 @@ pub mod params;
 pub mod ppks;
 mod util;
 
+use core::sync::atomic::{AtomicU16, Ordering};
 pub use crate::{attitude::Ahrs, params::Params};
 
 use chrono::NaiveDateTime;
 use lin_alg2::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
+
+use num_traits::Float;
 
 use defmt::println;
 
@@ -181,4 +184,62 @@ pub fn print_quat(quat: Quaternion, name: &str) {
 pub(crate) fn blend(val0: f32, val1: f32, amount: f32) -> f32 {
     let amount_inv = 1. - amount;
     val0 * amount_inv + val1 * amount
+}
+
+pub enum CalResult {
+    Incomplete,
+    Success((f32, f32, f32)),
+    Fail,
+    Disabled,
+}
+
+static ACC_CAL_VALS_LOGGED: AtomicU16 = AtomicU16::new(0);
+static mut ACC_CAL_TOTAL: Vec3 = Vec3::new_zero();
+
+/// Utility function to be called from firmware; designed to be run from a main loop or similar function.
+pub fn cal_accel(calibrating: &mut bool, num_vals: u16, vals_to_skip: u16, imu_data: &ImuReadings) -> CalResult {
+    if !*calibrating {
+        return CalResult::Disabled;
+    }
+
+    // Actually all loops since start, including the skipped ones.
+    let vals = ACC_CAL_VALS_LOGGED.fetch_add(1, Ordering::Relaxed);
+
+    if vals > (num_vals + vals_to_skip) {
+        *calibrating = false;
+        ACC_CAL_VALS_LOGGED.store(0, Ordering::Release);
+
+        let x = unsafe { ACC_CAL_TOTAL.x } / num_vals as f32;
+        let y = unsafe { ACC_CAL_TOTAL.y } / num_vals as f32;
+        let z = unsafe { ACC_CAL_TOTAL.z } / num_vals as f32 - G;
+
+        const CAL_THRESH: f32 = 0.4; // m/s^2
+        if x.abs() < CAL_THRESH
+            && y.abs() < CAL_THRESH
+            && (z - G).abs() < CAL_THRESH
+        {
+            return CalResult::Success((x, y, z));
+        } else {
+            println!("Acc cal failed due to out of bounds value");
+            return CalResult::Fail;
+        }
+    } else if vals > vals_to_skip {
+        let acc_data = Vec3::new(imu_data.a_x, imu_data.a_y, imu_data.a_z);
+
+        // If any value is above the thresh, ommit it.
+        // todo: You still need to fail the calibration if there are too many failures etc.
+        const CAL_THRESH: f32 = 0.6; // m/s^2
+        if acc_data.x.abs() < CAL_THRESH
+            && acc_data.y.abs() < CAL_THRESH
+            && (acc_data.z - G).abs() < CAL_THRESH
+        {
+            unsafe {
+                ACC_CAL_TOTAL += acc_data;
+            }
+        } else {
+            // Don't count this towards the number of logged values.
+            ACC_CAL_VALS_LOGGED.store(vals - 1, Ordering::Release);
+        }
+    }
+    CalResult::Incomplete
 }

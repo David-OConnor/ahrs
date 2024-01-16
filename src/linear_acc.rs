@@ -20,7 +20,7 @@ use num_traits::Float;
 
 use crate::{ppks, ppks::PositVelEarthUnits, Fix, UP};
 
-/// Estimate linear acceleration by comparinFg the fused attitude's up direction (based primarily
+/// Estimate linear acceleration by comparing the fused attitude's up direction (based primarily
 /// on the gyro in the short term) to that from the accelerometer. This works well for short-duration
 /// linear accelerations, but fails for long-term ones, such as an orbit.
 pub fn from_gyro(accel_data: Vec3, att_gyro: Quaternion, acc_len_at_rest: f32) -> Vec3 {
