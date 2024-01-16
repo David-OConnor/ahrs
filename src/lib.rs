@@ -217,11 +217,11 @@ pub fn cal_accel(
         let y = unsafe { ACC_CAL_TOTAL.y } / num_vals as f32;
         let z = unsafe { ACC_CAL_TOTAL.z } / num_vals as f32 - G;
 
-        const CAL_THRESH: f32 = 0.4; // m/s^2
-        if x.abs() < CAL_THRESH && y.abs() < CAL_THRESH && (z - G).abs() < CAL_THRESH {
+        const THRESH_A: f32 = 0.45; // m/s^2
+        if x.abs() < THRESH_A && y.abs() < THRESH_A && z.abs() < THRESH_A {
             return CalResult::Success((x, y, z));
         } else {
-            println!("Acc cal failed due to out of bounds value");
+            println!("Acc cal failed due to out of bounds value. X: {} Y: {} Z: {} Thresh: {}", x, y, z, THRESH_A);
             return CalResult::Fail;
         }
     } else if vals > vals_to_skip {
@@ -229,10 +229,10 @@ pub fn cal_accel(
 
         // If any value is above the thresh, ommit it.
         // todo: You still need to fail the calibration if there are too many failures etc.
-        const CAL_THRESH: f32 = 0.6; // m/s^2
-        if acc_data.x.abs() < CAL_THRESH
-            && acc_data.y.abs() < CAL_THRESH
-            && (acc_data.z - G).abs() < CAL_THRESH
+        const THRESH: f32 = 0.6; // m/s^2
+        if acc_data.x.abs() < THRESH
+            && acc_data.y.abs() < THRESH
+            && (acc_data.z - G).abs() < THRESH
         {
             unsafe {
                 ACC_CAL_TOTAL += acc_data;
