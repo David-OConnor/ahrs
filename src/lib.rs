@@ -22,15 +22,14 @@ pub mod ppks;
 mod util;
 
 use core::sync::atomic::{AtomicU16, Ordering};
-pub use crate::{attitude::Ahrs, params::Params};
 
 use chrono::NaiveDateTime;
+use defmt::println;
 use lin_alg2::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
-
 use num_traits::Float;
 
-use defmt::println;
+pub use crate::{attitude::Ahrs, params::Params};
 
 // C file with impl of EKF for quaternion rotation:
 // https://github.com/pms67/EKF-Quaternion-Attitude-Estimation/blob/master/EKF.h
@@ -197,7 +196,12 @@ static ACC_CAL_VALS_LOGGED: AtomicU16 = AtomicU16::new(0);
 static mut ACC_CAL_TOTAL: Vec3 = Vec3::new_zero();
 
 /// Utility function to be called from firmware; designed to be run from a main loop or similar function.
-pub fn cal_accel(calibrating: &mut bool, num_vals: u16, vals_to_skip: u16, imu_data: &ImuReadings) -> CalResult {
+pub fn cal_accel(
+    calibrating: &mut bool,
+    num_vals: u16,
+    vals_to_skip: u16,
+    imu_data: &ImuReadings,
+) -> CalResult {
     if !*calibrating {
         return CalResult::Disabled;
     }
@@ -214,10 +218,7 @@ pub fn cal_accel(calibrating: &mut bool, num_vals: u16, vals_to_skip: u16, imu_d
         let z = unsafe { ACC_CAL_TOTAL.z } / num_vals as f32 - G;
 
         const CAL_THRESH: f32 = 0.4; // m/s^2
-        if x.abs() < CAL_THRESH
-            && y.abs() < CAL_THRESH
-            && (z - G).abs() < CAL_THRESH
-        {
+        if x.abs() < CAL_THRESH && y.abs() < CAL_THRESH && (z - G).abs() < CAL_THRESH {
             return CalResult::Success((x, y, z));
         } else {
             println!("Acc cal failed due to out of bounds value");

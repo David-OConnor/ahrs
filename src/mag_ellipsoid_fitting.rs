@@ -13,14 +13,11 @@
 // todo: Good approach, but you may be limited by embedded here on the matrix inverse. Maybe
 // todo loop in nalgebra
 
+use defmt::println;
+use lin_alg2::f32::{Mat3, Vec3};
 use na::{Matrix3, Matrix4, RowVector4, SMatrix, SVector};
 use nalgebra as na;
-
 use num_traits::Float;
-
-use lin_alg2::f32::{Mat3, Vec3};
-
-use defmt::println;
 
 // todo: In addition to fitting hard and soft iron offsets from ellipsoids,
 // todo: You can use the gyro to factor into these.

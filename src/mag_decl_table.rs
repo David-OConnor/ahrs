@@ -1,4 +1,5 @@
 use core::f32::consts::TAU;
+
 use num_traits::Float;
 
 // todo: Update the table; it's from 2012

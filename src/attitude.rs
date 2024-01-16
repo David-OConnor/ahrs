@@ -2,13 +2,10 @@
 //!
 //!
 
-use num_traits::float::Float; // abs etc
-
-use lin_alg2::f32::{Mat3, Quaternion, Vec3};
-
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
-
 use defmt::println;
+use lin_alg2::f32::{Mat3, Quaternion, Vec3};
+use num_traits::float::Float; // abs etc
 
 use crate::{
     blend, linear_acc, mag_decl_table,

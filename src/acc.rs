@@ -1,10 +1,8 @@
 //! This module contains some accelerometer-specific code
 
-use num_traits::float::Float; // abs etc
-
-use lin_alg2::f32::{Quaternion, Vec3};
-
 use defmt::println;
+use lin_alg2::f32::{Quaternion, Vec3};
+use num_traits::float::Float; // abs etc
 
 use crate::{
     attitude::{make_nudge, Ahrs, AhrsCal},

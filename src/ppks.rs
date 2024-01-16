@@ -4,9 +4,8 @@
 
 // todo: Move to ahrs module, but we need to sort out how to handle `Fix`.
 
-use num_traits::Float;
-
 use lin_alg2::f32::{Quaternion, Vec3};
+use num_traits::Float;
 
 use crate::{Fix, DEG_SCALE_1E8};
 

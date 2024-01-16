@@ -3,6 +3,7 @@
 //!
 //! Uses:
 //! #1: Determining how much faith (and wight) to put into the accelerometer reading for
+use defmt::println;
 /// attitude determination.
 /// #2: Providing an acc solution that's closer to the true one for this fusing.
 /// #3: Removing linear acceleration when computing position from dead-reckoning
@@ -13,9 +14,6 @@
 /// - or, along those lines, discontinuities etc when fusing with gyro.
 ///
 use lin_alg2::f32::{Quaternion, Vec3};
-
-use defmt::println;
-
 use num_traits::Float;
 
 use crate::{ppks, ppks::PositVelEarthUnits, Fix, UP};
