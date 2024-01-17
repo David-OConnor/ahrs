@@ -13,6 +13,10 @@ use crate::{
     print_quat, DeviceOrientation, Fix, FORWARD, G, RIGHT, UP,
 };
 
+// todo: Part of cal config.
+pub(crate) const NUM_LIN_ACC_CUM_SAMPLES: u32 = 4_000;
+pub(crate) const SAMPLES_BEFORE_ACC_CALC: u32 = 8_000;
+
 pub struct AhrsConfig {
     /// How far to look back when determining linear acceleration bias from cumulative values. In seconds.
     pub lin_bias_lookback: f32,
@@ -131,9 +135,10 @@ pub struct AhrsCal {
     pub(crate) mag_sample_count_up: [u8; SAMPLE_VERTICES.len()],
     pub(crate) mag_sample_count_fwd: [u8; SAMPLE_VERTICES.len()],
     /// In m/s^2. Used for determining linear acceleration. This should be close to G.
-    pub(crate) acc_len_at_rest: f32,
+    pub acc_len_at_rest: f32,
     /// Used when aligning.
-    acc_len_cum: f32,
+    pub(crate) acc_len_cum: f32,
+    pub(crate) acc_len_count: u32,
     gyro_bias_eval_cum: Vec3,
     gyro_bias_eval_num_readings: u32,
 }
@@ -158,6 +163,7 @@ impl Default for AhrsCal {
             mag_sample_count_up: Default::default(),
             mag_sample_count_fwd: Default::default(),
             acc_len_cum: 0.,
+            acc_len_count: 0,
             acc_len_at_rest: G,
             gyro_bias_eval_cum: Vec3::new_zero(),
             gyro_bias_eval_num_readings: 0,
@@ -393,29 +399,37 @@ impl Ahrs {
     }
 
     /// Assumes no linear acceleration. Estimates linear acceleration biases.
-    fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
+    // pub(crate) fn align(&mut self, lin_acc_estimate: Vec3, acc_data: Vec3) {
+    pub(crate) fn align(&mut self, acc_data: Vec3) {
         // todo: Rework this.
 
-        if self.aligning() {
-            // Maybe this will help with bias estimates before we set it properly.
-            self.cal.acc_len_at_rest = acc_data.magnitude();
+        // if self.aligning() {
+        //     println!("Aligning...");
+        // Maybe this will help with bias estimates before we set it properly.
+        // self.cal.acc_len_at_rest = acc_data.magnitude();
 
-            self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
-            self.cal.acc_len_cum += acc_data.magnitude() * self.dt;
-            // self.cal.linear_acc_cum += lin_acc_estimate;
+        const MAG_THRESH: f32 = 0.5;
+
+        let mag = acc_data.magnitude();
+        if mag > G - MAG_THRESH && mag < G + MAG_THRESH {
+            // self.cal.linear_acc_cum += lin_acc_estimate * self.dt;
+            self.cal.acc_len_cum += mag;
+            self.cal.acc_len_count += 1;
         }
+        // self.cal.linear_acc_cum += lin_acc_estimate;
+        // }
 
-        if self.cal.linear_acc_bias == Vec3::new_zero()
-            && self.timestamp
-                > (self.config.start_alignment_time + self.config.alignment_duration) as f32
-        {
-            self.cal.linear_acc_bias =
-                self.cal.linear_acc_cum / self.config.alignment_duration as f32;
-
-            self.cal.acc_len_at_rest = self.cal.acc_len_cum / self.config.alignment_duration as f32;
-
-            println!("\n\nAlignment complete \n\n");
-        }
+        // if self.cal.linear_acc_bias == Vec3::new_zero()
+        //     && self.timestamp
+        //         > (self.config.start_alignment_time + self.config.alignment_duration) as f32
+        // {
+        //     self.cal.linear_acc_bias =
+        //         self.cal.linear_acc_cum / self.config.alignment_duration as f32;
+        //
+        //     self.cal.acc_len_at_rest = self.cal.acc_len_cum / self.config.alignment_duration as f32;
+        //
+        //     println!("\n\nAlignment complete \n\n");
+        // }
     }
 
     /// Update gyro bias from accelerometer-determined angular rate.

@@ -5,7 +5,7 @@ use lin_alg2::f32::{Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
 
 use crate::{
-    attitude::{make_nudge, Ahrs, AhrsCal},
+    attitude::{make_nudge, Ahrs, AhrsCal, NUM_LIN_ACC_CUM_SAMPLES, SAMPLES_BEFORE_ACC_CALC},
     linear_acc, print_quat, UP,
 };
 
@@ -45,6 +45,17 @@ impl Ahrs {
 
         // todo: Rework alignment
         // self.align(lin_acc_estimate, accel_data);
+        if self.cal.acc_len_count == NUM_LIN_ACC_CUM_SAMPLES + SAMPLES_BEFORE_ACC_CALC {
+            self.cal.acc_len_at_rest = self.cal.acc_len_cum / NUM_LIN_ACC_CUM_SAMPLES as f32;
+            // println!("\n\nAcc len at rest found: {:?}", self.cal.acc_len_at_rest);
+            self.cal.acc_len_count += 1; // so this no longer triggers.
+        } else if self.cal.acc_len_count > SAMPLES_BEFORE_ACC_CALC
+            && self.cal.acc_len_count < NUM_LIN_ACC_CUM_SAMPLES + SAMPLES_BEFORE_ACC_CALC
+        {
+            self.align(acc);
+        } else if self.cal.acc_len_count <= SAMPLES_BEFORE_ACC_CALC {
+            self.cal.acc_len_count += 1;
+        }
 
         // self.linear_acc_estimate = lin_acc_estimate_bias_removed;
         self.lin_acc_fused = lin_acc_gyro;
