@@ -44,7 +44,7 @@ impl PositFused {
         // todo: fix here vs inertial's anchor? Likely the same.
         fix: &Fix,
         inertial: &mut PositInertial,
-        timestamp: f32,
+        timestamp: u64,
     ) -> Self {
         let gnss_dr = PositVelEarthUnits::from_fix_dr(fix, timestamp);
 
@@ -84,7 +84,7 @@ impl PositFused {
             + (elevation_msl - (fix.elevation_msl as f32 / 1_000.));
 
         Self {
-            timestamp_us: (timestamp * 1_000_000.) as u64,
+            timestamp_us: timestamp * 1_000,
             lon_e8: gnss_dr.lon_e8 + add_to_gnss.lon_e8,
             lat_e8: gnss_dr.lat_e8 + add_to_gnss.lat_e8,
             elevation_msl,
@@ -249,8 +249,9 @@ impl PositVelEarthUnits {
     /// Returns a result with lat, lon, and alt as f32.
     /// time is in seconds.
     /// Returns lat, lon (both 1e7), and alt in mm.
-    pub fn from_fix_dr(fix: &Fix, timestamp_s: f32) -> Self {
-        let dt = timestamp_s - fix.timestamp_s;
+    pub fn from_fix_dr(fix: &Fix, timestamp: u64) -> Self {
+        // todo: Is this fix precision acceptable?
+        let dt = (timestamp as f32 / 1_000.)  - fix.timestamp_s;
 
         let velocity = ned_vel_to_xyz(fix.ned_velocity);
 
