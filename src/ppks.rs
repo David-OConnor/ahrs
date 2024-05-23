@@ -250,7 +250,7 @@ impl PositVelEarthUnits {
     /// time is in seconds.
     /// Returns lat, lon (both 1e7), and alt in mm.
     pub fn from_fix_dr(fix: &Fix, timestamp_us: u64) -> Self {
-        let dt = (timestamp_us as f32 / 1_000_000.)  - fix.timestamp_s;
+        let dt = (timestamp_us as f32 / 1_000_000.) - fix.timestamp_s;
 
         let velocity = ned_vel_to_xyz(fix.ned_velocity);
 
