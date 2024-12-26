@@ -25,7 +25,7 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use chrono::NaiveDateTime;
 use defmt::println;
-use lin_alg2::f32::{Quaternion, Vec3};
+use lin_alg::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
 use num_traits::Float;
 

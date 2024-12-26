@@ -5,7 +5,7 @@ use core::f32::consts::TAU;
 use defmt::println;
 // todo: Assess mag health using consistency of mag vector len (calibrated). It should be
 // todo close to 1. THrow out readings that aren't close to 1.
-use lin_alg2::f32::{Quaternion, Vec3};
+use lin_alg::f32::{Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
 
 use crate::{

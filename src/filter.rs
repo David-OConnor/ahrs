@@ -3,7 +3,7 @@
 use cmsis_dsp_api as dsp_api;
 use cmsis_dsp_sys as dsp_sys;
 
-use lin_alg2::f32::Vec3;
+use lin_alg::f32::Vec3;
 
 /// Used to satisfy RTIC resource Send requirements.
 pub struct IirInstWrapper {

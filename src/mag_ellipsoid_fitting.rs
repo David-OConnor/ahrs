@@ -14,7 +14,7 @@
 // todo loop in nalgebra
 
 use defmt::println;
-use lin_alg2::f32::{Mat3, Vec3};
+use lin_alg::f32::{Mat3, Vec3};
 use na::{Matrix3, Matrix4, RowVector4, SMatrix, SVector};
 use nalgebra as na;
 use num_traits::Float;

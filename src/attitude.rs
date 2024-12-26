@@ -4,7 +4,7 @@
 
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
 use defmt::println;
-use lin_alg2::f32::{Mat3, Quaternion, Vec3};
+use lin_alg::f32::{Mat3, Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
 
 use crate::{

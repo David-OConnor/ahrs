@@ -7,7 +7,7 @@ description = "Attitude and heading reference system"
 
 [dependencies]
 num-traits = { version = "^0.2.15", default_features = false } # Absolute value, powers etc.
-lin-alg2 = { path = "../lin_alg", features = ["no_std"] }
+lin_alg = { version = "^1.0.0", features = ["no_std"] }
 defmt = "^0.3.4"
 
 # To parse enums from their integer repr

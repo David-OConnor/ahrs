@@ -13,7 +13,7 @@ use defmt::println;
 /// - Discontinuities or other anomolies when integrating accel-based attitude over time,
 /// - or, along those lines, discontinuities etc when fusing with gyro.
 ///
-use lin_alg2::f32::{Quaternion, Vec3};
+use lin_alg::f32::{Quaternion, Vec3};
 use num_traits::Float;
 
 use crate::{ppks, ppks::PositVelEarthUnits, Fix, UP};
