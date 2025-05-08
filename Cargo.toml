@@ -1,23 +1,30 @@
 [package]
 name = "ahrs"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Attitude and heading reference system"
+keywords = ["embedded", "ahrs", "attitude"]
+categories = [
+    "no-std",
+]
+repository = "https://github.com/David-OConnor/ahrs"
+documentation = "https://docs.rs/ahrs"
+readme = "README.md"
+license = "MIT"
+exclude = [".gitignore"]
 
 
 [dependencies]
-num-traits = { version = "^0.2.15", default_features = false } # Absolute value, powers etc.
-lin_alg = { version = "^1.0.0", features = ["no_std"] }
-defmt = "^0.3.4"
+num-traits = { version = "^0.2.19", default-features = false } # Absolute value, powers etc.
+lin_alg = { version = "^1.1.8", features = ["no_std"] }
+defmt = "^1.0.1"
 
 # To parse enums from their integer repr
-num_enum = { version = "^0.7.0", default_features = false }
+num_enum = { version = "^0.7.3", default-features = false }
 
 # `Chrono` for GNSS timestamp
-chrono = { version = "^0.4.23", default-features = false }
+chrono = { version = "^0.4.41", default-features = false }
 
 # For magnetometer ellipsoid fitting. `libm` feature required for inverse and eigen.
-nalgebra = { version = "^0.32.2", default-features = false, features = ["libm"]}
-
-#cmsis-dsp-sys = "^0.3.1"
-#cmsis-dsp-api = { git = "https://github.com/David-OConnor/cmsis-dsp-api"}
+nalgebra = { version = "^0.33.2", default-features = false, features = ["libm"]}
