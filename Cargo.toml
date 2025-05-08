@@ -1,6 +1,6 @@
 [package]
 name = "ahrs2"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Attitude and heading reference system"
@@ -17,7 +17,7 @@ exclude = [".gitignore"]
 
 [dependencies]
 num-traits = { version = "^0.2.19", default-features = false } # Absolute value, powers etc.
-lin_alg = { version = "^1.1.8", features = ["no_std"] }
+lin_alg = { version = "^1.1.8", default-features = false, features = ["no_std"] }
 defmt = "^1.0.1"
 
 # To parse enums from their integer repr
