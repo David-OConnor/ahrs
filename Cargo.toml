@@ -1,6 +1,6 @@
 [package]
 name = "ahrs"
-version = "0.1.0"
+version = "0.2.11"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Attitude and heading reference system"
