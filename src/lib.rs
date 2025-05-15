@@ -24,7 +24,7 @@ mod util;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 use chrono::NaiveDateTime;
-use defmt::println;
+use defmt::{Format, println};
 use lin_alg::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
 use num_traits::Float;
@@ -127,7 +127,7 @@ pub struct Fix {
 
 /// Represents sensor readings from a 6-axis accelerometer + gyro.
 /// Accelerometer readings are in m/2^2. Gyroscope readings are in radians/s.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Format)]
 pub struct ImuReadings {
     /// Positive X: Accel towards right wing
     pub a_x: f32,
