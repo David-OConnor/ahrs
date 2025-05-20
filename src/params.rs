@@ -5,7 +5,6 @@
 
 // use crate::{ppks::PositionFused};
 
-use defmt::println;
 use lin_alg::f32::{Quaternion, Vec3};
 
 use crate::{ppks::PositFused, Ahrs, DeviceOrientation, ImuReadings};

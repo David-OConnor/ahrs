@@ -1,6 +1,5 @@
 //! This module contains some accelerometer-specific code
 
-use defmt::println;
 use lin_alg::f32::{Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
 
@@ -8,6 +7,10 @@ use crate::{
     attitude::{make_nudge, Ahrs, AhrsCal, NUM_LIN_ACC_CUM_SAMPLES, SAMPLES_BEFORE_ACC_CALC},
     linear_acc, print_quat, UP,
 };
+
+#[cfg(feature = "defmt")]
+use defmt::println;
+
 
 impl AhrsCal {
     fn apply_cal_acc(&self, data: Vec3) -> Vec3 {
@@ -97,6 +100,7 @@ impl Ahrs {
             *att_fused = rot_correction * *att_fused;
         }
 
+        #[cfg(feature = "defmt")]
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
         if false {
             println!("Acc cal x{} y{} z{}", acc.x, acc.y, acc.z);

@@ -3,7 +3,6 @@
 //!
 //! Uses:
 //! #1: Determining how much faith (and wight) to put into the accelerometer reading for
-use defmt::println;
 /// attitude determination.
 /// #2: Providing an acc solution that's closer to the true one for this fusing.
 /// #3: Removing linear acceleration when computing position from dead-reckoning

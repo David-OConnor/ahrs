@@ -11,6 +11,7 @@ use crate::{Fix, DEG_SCALE_1E8};
 
 pub const FIX_FUSED_SIZE: usize = 8 * 3 + 4 * 5;
 
+#[cfg(feature = "defmt")]
 use defmt::println;
 
 /// Convert NED velocity in mm/s to xyz velocity in m/s. (Still in earth frame.)
@@ -161,6 +162,7 @@ impl PositInertial {
 
         let combined = self.combine_with_anchor();
 
+        #[cfg(feature = "defmt")]
         // if unsafe { I } % 2000 == 0 {
         if false {
             println!(

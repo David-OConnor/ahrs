@@ -24,10 +24,12 @@ mod util;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 use chrono::NaiveDateTime;
-use defmt::{Format, println};
 use lin_alg::f32::{Quaternion, Vec3};
 use num_enum::TryFromPrimitive;
 use num_traits::Float;
+
+#[cfg(feature = "defmt")]
+use defmt::{Format, println};
 
 pub use crate::{attitude::Ahrs, params::Params};
 
@@ -127,7 +129,8 @@ pub struct Fix {
 
 /// Represents sensor readings from a 6-axis accelerometer + gyro.
 /// Accelerometer readings are in m/2^2. Gyroscope readings are in radians/s.
-#[derive(Default, Clone, Format)]
+#[derive(Default, Clone)]
+#[cfg_attr(feature = "defmt", derive(Format))]
 pub struct ImuReadings {
     /// Positive X: Accel towards right wing
     pub a_x: f32,
@@ -171,6 +174,7 @@ pub fn interpret_accel_or_gyro(val: i16, fullscale: f32) -> f32 {
 pub fn print_quat(quat: Quaternion, name: &str) {
     let (x_component, y_component, z_component) = quat.to_axes();
 
+    #[cfg(feature = "defmt")]
     println!(
         "{} -- x{} y{} z{}",
         name, x_component, y_component, z_component
@@ -221,6 +225,7 @@ pub fn cal_accel(
         if x.abs() < THRESH_A && y.abs() < THRESH_A && z.abs() < THRESH_A {
             return CalResult::Success((x, y, z));
         } else {
+            #[cfg(feature = "defmt")]
             println!(
                 "Acc cal failed due to out of bounds value. X: {} Y: {} Z: {} Thresh: {}",
                 x, y, z, THRESH_A

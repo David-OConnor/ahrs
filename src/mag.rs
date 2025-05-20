@@ -2,11 +2,13 @@
 
 use core::f32::consts::TAU;
 
-use defmt::println;
 // todo: Assess mag health using consistency of mag vector len (calibrated). It should be
 // todo close to 1. THrow out readings that aren't close to 1.
 use lin_alg::f32::{Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
+
+#[cfg(feature = "defmt")]
+use defmt::println;
 
 use crate::{
     attitude::{make_nudge, Ahrs, AhrsCal},
@@ -91,6 +93,7 @@ impl AhrsCal {
 
         const EPS: f32 = 0.0000001;
 
+        #[cfg(feature = "defmt")]
         println!("\nMag cal complete\n");
 
         let mut i = 0;
@@ -225,6 +228,7 @@ impl Ahrs {
 
             *att_fused = rot_correction_from_att * rot_correction_from_heading * *att_fused;
 
+            #[cfg(feature = "defmt")]
             // if self.num_updates % ((1. / self.dt) as u32) == 0 {
             if false {
                 println!("HDG: {:?}", hdg);
@@ -239,8 +243,10 @@ impl Ahrs {
 
         self.update_mag_incl(mag_norm);
 
+        #[cfg(feature = "defmt")]
         // if self.num_updates % ((1. / self.dt) as u32) == 0 {
         if false {
+            #[cfg(feature = "defmt")]
             println!(
                 "\n\nMag raw: x{} y{} z{} len{}",
                 mag_raw.x,
@@ -249,6 +255,7 @@ impl Ahrs {
                 mag_raw.magnitude()
             );
 
+            #[cfg(feature = "defmt")]
             println!(
                 "Mag: x{} y{} z{} len{}",
                 mag.x,
@@ -257,10 +264,12 @@ impl Ahrs {
                 mag.magnitude()
             );
 
-            println!("Estimated mag incl: {}", self.mag_inclination_estimate);
-            println!("Recent mag var: {}", self.recent_mag_variance);
+            #[cfg(feature = "defmt")] {
+                println!("Estimated mag incl: {}", self.mag_inclination_estimate);
+                println!("Recent mag var: {}", self.recent_mag_variance);
 
-            print_quat(att_mag, "Att mag");
+                print_quat(att_mag, "Att mag");
+            }
         }
 
         if self.num_updates % self.config.update_ratio_mag_cal_log as u32 == 0 {

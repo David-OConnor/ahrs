@@ -13,7 +13,6 @@
 // todo: Good approach, but you may be limited by embedded here on the matrix inverse. Maybe
 // todo loop in nalgebra
 
-use defmt::println;
 use lin_alg::f32::{Mat3, Vec3};
 use na::{Matrix3, Matrix4, RowVector4, SMatrix, SVector};
 use nalgebra as na;

@@ -3,7 +3,6 @@
 //!
 
 // static MAG_CAL_I: AtomicUsize = AtomicUsize::new(0);
-use defmt::println;
 use lin_alg::f32::{Mat3, Quaternion, Vec3};
 use num_traits::float::Float; // abs etc
 
@@ -341,15 +340,15 @@ impl Ahrs {
             print_quat(self.attitude, "\n\nAtt fused");
             print_quat(self.att_from_acc, "Att acc");
 
-            println!(
-                "Gyro raw: x{} y{} z{}. Cal: x{} y{} z{}",
-                gyro_data.x,
-                gyro_data.y,
-                gyro_data.z,
-                gyro_calibrated.x,
-                gyro_calibrated.y,
-                gyro_calibrated.z,
-            );
+            // println!(
+            //     "Gyro raw: x{} y{} z{}. Cal: x{} y{} z{}",
+            //     gyro_data.x,
+            //     gyro_data.y,
+            //     gyro_data.z,
+            //     gyro_calibrated.x,
+            //     gyro_calibrated.y,
+            //     gyro_calibrated.z,
+            // );
 
             // println!(
             //     "Acc rate: x{} y{} z{}",
@@ -374,14 +373,14 @@ impl Ahrs {
             //     acc_calibrated.magnitude()
             // );
 
-            println!(
-                "Lin acc gyro x{} y{} z{}",
-                self.lin_acc_gyro.x, self.lin_acc_gyro.y, self.lin_acc_gyro.z
-            );
-
-            if let Some(la) = self.lin_acc_gnss {
-                println!("Lin acc GNSS: x{} y{} z{}", la.x, la.y, la.z);
-            }
+            // println!(
+            //     "Lin acc gyro x{} y{} z{}",
+            //     self.lin_acc_gyro.x, self.lin_acc_gyro.y, self.lin_acc_gyro.z
+            // );
+            //
+            // if let Some(la) = self.lin_acc_gnss {
+            //     println!("Lin acc GNSS: x{} y{} z{}", la.x, la.y, la.z);
+            // }
 
             print_quat(self.att_from_acc, "ATT from acc");
 
