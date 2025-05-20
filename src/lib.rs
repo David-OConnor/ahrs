@@ -131,6 +131,7 @@ pub struct Fix {
 /// Accelerometer readings are in m/2^2. Gyroscope readings are in radians/s.
 #[derive(Default, Clone)]
 #[cfg_attr(feature = "defmt", derive(Format))]
+#[cfg_attr(not(feature = "defmt"), derive(Debug))]
 pub struct ImuReadings {
     /// Positive X: Accel towards right wing
     pub a_x: f32,
