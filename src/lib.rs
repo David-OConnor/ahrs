@@ -80,6 +80,8 @@ impl Default for DeviceOrientation {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[cfg_attr(not(feature = "defmt"), derive(Debug))]
 #[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 pub enum FixType {
@@ -100,6 +102,8 @@ impl Default for FixType {
 }
 
 #[derive(Clone, Default)]
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[cfg_attr(not(feature = "defmt"), derive(Debug))]
 /// In a format conducive to being parsed from the UBX PVT. (`UBX-NAV-PVT`)
 /// Note: For position and elevation, we use the same units as Ublox reports; we
 /// can convert to floats as required downstream.
