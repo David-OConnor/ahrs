@@ -102,7 +102,8 @@ impl Default for FixType {
 }
 
 #[derive(Clone, Default)]
-#[cfg_attr(feature = "defmt", derive(Format))]
+// todo: Format unavail on NaiveDateTime
+// #[cfg_attr(feature = "defmt", derive(Format))]
 #[cfg_attr(not(feature = "defmt"), derive(Debug))]
 /// In a format conducive to being parsed from the UBX PVT. (`UBX-NAV-PVT`)
 /// Note: For position and elevation, we use the same units as Ublox reports; we
